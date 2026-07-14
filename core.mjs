@@ -29,6 +29,16 @@ export function safePdfName(name, suffix = "edited") {
   return `${base}-${suffix}.pdf`;
 }
 
+export function parseHexColor(value) {
+  const match = String(value || "").trim().match(/^#([0-9a-f]{6})$/i);
+  if (!match) throw new Error("Choose a valid watermark color.");
+  return {
+    red: Number.parseInt(match[1].slice(0, 2), 16) / 255,
+    green: Number.parseInt(match[1].slice(2, 4), 16) / 255,
+    blue: Number.parseInt(match[1].slice(4, 6), 16) / 255,
+  };
+}
+
 export async function buildPdfFromPages(sources, pageItems) {
   const output = await PDFDocument.create();
   for (const item of pageItems) {
@@ -77,6 +87,7 @@ export async function stampPdf(bytes, options) {
   if (options.kind === "watermark") {
     const text = String(options.text || "DRAFT").trim();
     if (!text) throw new Error("Enter watermark text.");
+    const watermarkColor = parseHexColor(options.color || "#7347ad");
     pages.forEach((page) => {
       const { width, height } = page.getSize();
       const watermarkSize = Math.min(Number(options.fontSize || 54), Math.max(22, width / 7));
@@ -86,7 +97,7 @@ export async function stampPdf(bytes, options) {
         y: height / 2 - watermarkSize / 2,
         size: watermarkSize,
         font,
-        color: rgb(0.45, 0.28, 0.68),
+        color: rgb(watermarkColor.red, watermarkColor.green, watermarkColor.blue),
         opacity: Number(options.opacity || 0.18),
         rotate: degrees(35),
       });

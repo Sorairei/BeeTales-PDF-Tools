@@ -168,7 +168,7 @@ async function processFiles() {
     } else {
       const kind = activeValue("stamp-kind"); const options = { kind };
       if (kind === "numbers") Object.assign(options, { startAt: document.querySelector("#number-start").value, position: document.querySelector("#number-position").value });
-      if (kind === "watermark") Object.assign(options, { text: document.querySelector("#watermark-text").value, fontSize: document.querySelector("#watermark-size").value, opacity: document.querySelector("#watermark-opacity").value });
+      if (kind === "watermark") Object.assign(options, { text: document.querySelector("#watermark-text").value, fontSize: document.querySelector("#watermark-size").value, opacity: document.querySelector("#watermark-opacity").value, color: document.querySelector("#watermark-color").value });
       if (kind === "signature") { if (!signatureFile) throw new Error("Choose a signature image first."); Object.assign(options, { imageBytes: new Uint8Array(await signatureFile.arrayBuffer()), imageType: signatureFile.type || (/\.png$/i.test(signatureFile.name) ? "image/png" : "image/jpeg"), page: document.querySelector("#signature-page").value, position: document.querySelector("#signature-position").value, allPages: document.querySelector("#signature-all").checked }); }
       const bytes = await stampPdf(sources[0].bytes, options); addResult(bytes, safePdfName(sources[0].file.name, kind === "numbers" ? "numbered" : kind === "watermark" ? "watermarked" : "signed"), `${pageItems.length} pages`);
     }
@@ -191,5 +191,6 @@ elements.pageGrid.addEventListener("drop", async (event) => { event.preventDefau
 document.querySelectorAll('input[name="extract-action"]').forEach((input) => input.addEventListener("change", () => { const copy = { extract: "Enter the pages to keep in a new PDF.", remove: "Enter the pages to remove from the PDF.", split: "Enter the pages that should become separate PDF files." }; elements.selectionHelp.textContent = copy[input.value]; }));
 document.querySelectorAll('input[name="stamp-kind"]').forEach((input) => input.addEventListener("change", () => { elements.numberOptions.classList.toggle("is-hidden", input.value !== "numbers"); elements.watermarkOptions.classList.toggle("is-hidden", input.value !== "watermark"); elements.signatureOptions.classList.toggle("is-hidden", input.value !== "signature"); }));
 elements.signatureInput.addEventListener("change", () => { signatureFile = elements.signatureInput.files[0] || null; elements.signatureLabel.textContent = signatureFile ? signatureFile.name : "Choose a PNG or JPG signature"; });
+document.querySelector("#watermark-color").addEventListener("input", (event) => { document.querySelector("#watermark-color-value").textContent = event.target.value.toUpperCase(); });
 
 applyMode();

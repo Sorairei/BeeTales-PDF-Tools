@@ -12,9 +12,8 @@
     <main class="app-shell">
       <section class="workspace" aria-labelledby="app-title">
         <div class="intro">
-          <div class="brand-mark" aria-label="BeeTales">
-            <img src="assets/beetales-logo.svg" alt="BeeTales logo" width="96" height="96" />
-            <div><p>BeeTales</p><span>Local PDF toolkit</span></div>
+          <div class="brand-mark brand-logo-lockup" aria-label="The BeeTales">
+            <img src="assets/beetales-logo-v2.png" alt="The BeeTales" width="1200" height="357" />
           </div>
 
           <figure class="brand-visual" aria-label="A stack of PDF documents being organized">
@@ -32,7 +31,7 @@
             <span>MERGE</span><span>SPLIT</span><span>ROTATE</span><span>SIGN</span>
           </div>
           <div class="privacy-note" role="note">
-            <div class="privacy-shield" aria-hidden="true">✓</div>
+            <img class="privacy-mascot" src="assets/sora-avatar.png" alt="Sora, the BeeTales privacy mascot" width="1254" height="1254" />
             <div>
               <strong>Private by design</strong>
               <p>Your files never leave this device. No uploads, accounts, or document server.</p>
@@ -87,7 +86,7 @@
           <section class="settings-card is-hidden" id="stamp-settings">
             <fieldset><legend>Add to the document</legend><div class="segmented-control three"><label><input type="radio" name="stamp-kind" value="numbers" checked /><span>Numbers</span></label><label><input type="radio" name="stamp-kind" value="watermark" /><span>Watermark</span></label><label><input type="radio" name="stamp-kind" value="signature" /><span>Signature</span></label></div></fieldset>
             <div class="stamp-options" id="number-options"><div class="settings-grid"><label class="field"><span>Start at</span><input id="number-start" type="number" min="0" value="1" /></label><label class="field"><span>Position</span><select id="number-position"><option value="bottom-center">Bottom center</option><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-center">Top center</option></select></label></div></div>
-            <div class="stamp-options is-hidden" id="watermark-options"><label class="field"><span>Watermark text</span><input id="watermark-text" type="text" maxlength="80" value="DRAFT" /></label><div class="settings-grid"><label class="field"><span>Size</span><select id="watermark-size"><option value="42">Small</option><option value="54" selected>Medium</option><option value="72">Large</option></select></label><label class="field"><span>Opacity</span><select id="watermark-opacity"><option value="0.12">Light</option><option value="0.18" selected>Medium</option><option value="0.28">Strong</option></select></label></div></div>
+            <div class="stamp-options is-hidden" id="watermark-options"><label class="field"><span>Watermark text</span><input id="watermark-text" type="text" maxlength="80" value="DRAFT" /></label><div class="settings-grid"><label class="field"><span>Size</span><select id="watermark-size"><option value="42">Small</option><option value="54" selected>Medium</option><option value="72">Large</option></select></label><label class="field"><span>Opacity</span><select id="watermark-opacity"><option value="0.12">Light</option><option value="0.18" selected>Medium</option><option value="0.28">Strong</option></select></label></div><label class="field"><span>Color</span><span class="color-control"><input id="watermark-color" type="color" value="#7347ad" aria-label="Watermark color" /><output id="watermark-color-value" for="watermark-color">#7347AD</output></span></label></div>
             <div class="stamp-options is-hidden" id="signature-options"><label class="signature-picker" for="signature-input"><input id="signature-input" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" /><span id="signature-label">Choose a PNG or JPG signature</span></label><div class="settings-grid"><label class="field"><span>Page</span><input id="signature-page" type="number" min="1" value="1" /></label><label class="field"><span>Position</span><select id="signature-position"><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-right">Top right</option><option value="top-left">Top left</option></select></label></div><label class="check-field"><input id="signature-all" type="checkbox" /><span>Place on every page</span></label></div>
           </section>
 

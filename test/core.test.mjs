@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "../vendor/pdf-lib/pdf-lib.esm.min.js";
-import { buildPdfFromPages, parsePageSelection, stampPdf } from "../core.mjs";
+import { buildPdfFromPages, parseHexColor, parsePageSelection, stampPdf } from "../core.mjs";
 
 test("page selections accept ranges, spaces, and duplicates", () => {
   assert.deepEqual(parsePageSelection("1-3, 3, 5", 5), [0, 1, 2, 4]);
   assert.throws(() => parsePageSelection("6", 5), /outside/);
   assert.throws(() => parsePageSelection("4-2", 5), /backwards/);
+});
+
+test("watermark colors are converted from hex to PDF RGB values", () => {
+  assert.deepEqual(parseHexColor("#ff8000"), { red: 1, green: 128 / 255, blue: 0 });
+  assert.throws(() => parseHexColor("purple"), /valid watermark color/);
 });
 
 test("pages can be copied, reordered, and rotated", async () => {

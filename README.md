@@ -12,7 +12,7 @@ A static, open-source PDF toolkit that works entirely in the browser. Files are 
 - Split selected pages into individual PDF files.
 - Convert JPG and PNG images into a PDF.
 - Add page numbers in several positions.
-- Add a diagonal text watermark.
+- Add a diagonal text watermark with custom color, size, and opacity.
 - Place a PNG or JPG signature on one page or every page.
 - Render local page previews with PDF.js.
 - Responsive, accessible interface based on the BeeTales Media Converter visual language.

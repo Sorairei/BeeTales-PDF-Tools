@@ -3,3 +3,13 @@
 @media(max-width:900px){.workspace{grid-template-columns:1fr}.intro{min-height:auto;padding-top:4px}.tool-panel{grid-column:auto;grid-row:auto}.brand-visual{width:min(100%,560px)}}
 @media(max-width:580px){.app-shell{padding:20px 12px 82px;place-items:start center}.tool-panel{padding:16px}.mode-control{grid-template-columns:1fr}.mode-control>label>span{min-height:82px}.drop-zone{min-height:180px;padding:22px 16px}.page-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-grid{grid-template-columns:1fr}.segmented-control.three{grid-template-columns:1fr}.result-card{grid-template-columns:1fr}.site-footer{align-items:flex-start;flex-direction:column;gap:8px}.privacy-note{grid-template-columns:64px minmax(0,1fr);padding:14px}.privacy-shield{width:58px;height:65px}.sponsor-button{width:100%}.reset-floating-button{right:14px;bottom:14px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Official BeeTales identity */
+.brand-logo-lockup{display:block;width:min(100%,390px);margin-bottom:18px;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
+.brand-logo-lockup img{display:block;width:100%;height:auto;filter:drop-shadow(0 12px 24px rgba(0,0,0,.38))}
+.privacy-note{grid-template-columns:118px minmax(0,1fr)}
+.privacy-mascot{display:block;width:118px;height:auto;user-select:none;filter:drop-shadow(0 14px 24px rgba(0,0,0,.4))}
+.color-control{min-height:50px;display:flex;align-items:center;gap:12px;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong)}
+.field .color-control input[type="color"]{width:56px;min-height:36px;height:36px;padding:2px;border:1px solid var(--line-strong);border-radius:6px;background:#080c13;cursor:pointer}
+.color-control output{color:#dfe6f3;font-size:.8rem;font-weight:850;letter-spacing:.04em}
+@media(max-width:580px){.brand-logo-lockup{width:min(100%,350px)}.privacy-note{grid-template-columns:82px minmax(0,1fr)}.privacy-mascot{width:82px}}
