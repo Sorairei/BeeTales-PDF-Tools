@@ -1,0 +1,401 @@
+/*
+ * BeeTales swamp brand theme
+ * The structural rules remain in style.css; this file owns the visual identity.
+ */
+:root {
+  --bg: #050b07;
+  --panel: #0a150d;
+  --panel-soft: #102317;
+  --panel-strong: #07110b;
+  --text: #c7d7a0;
+  --muted: #8fa57a;
+  --line: #29402c;
+  --line-strong: #39563a;
+  --accent: #6e8f4a;
+  --accent-strong: #91bd59;
+  --accent-ink: #07100b;
+  --blue: #c58a35;
+  --danger: #ff7b66;
+  --success: #91bd59;
+  --amber: #c58a35;
+  --amber-strong: #e1a94d;
+  --cream: #d0dfa7;
+  --shadow: 0 28px 80px rgba(0, 8, 3, 0.55);
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  isolation: isolate;
+  background-color: #020604;
+  background-image:
+    linear-gradient(90deg, rgba(2, 6, 4, 0.78) 0%, rgba(2, 6, 4, 0.58) 48%, rgba(2, 6, 4, 0.38) 100%),
+    linear-gradient(180deg, rgba(2, 6, 4, 0.14), rgba(2, 6, 4, 0.48)),
+    url("assets/swamp-space.png");
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  mix-blend-mode: screen;
+  background-image:
+    radial-gradient(circle, rgba(184, 255, 61, 0.85) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(145, 189, 89, 0.72) 0 1px, transparent 2.2px),
+    radial-gradient(circle, rgba(225, 169, 77, 0.65) 0 1px, transparent 2px);
+  background-size: 173px 191px, 257px 223px, 337px 281px;
+  background-position: 12px 18px, 83px 47px, 151px 101px;
+  animation: beetales-fireflies 24s linear infinite;
+}
+
+.app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes beetales-fireflies {
+  0% {
+    background-position: 12px 18px, 83px 47px, 151px 101px;
+    opacity: 0.2;
+  }
+
+  45% {
+    opacity: 0.32;
+  }
+
+  100% {
+    background-position: 58px -73px, 21px -82px, 206px -39px;
+    opacity: 0.22;
+  }
+}
+
+::selection {
+  background: rgba(145, 189, 89, 0.3);
+  color: var(--cream);
+}
+
+.brand-logo-lockup img {
+  filter: drop-shadow(0 14px 24px rgba(0, 4, 1, 0.5));
+}
+
+.brand-visual {
+  border-color: rgba(110, 143, 74, 0.34);
+  background:
+    radial-gradient(circle at 50% 70%, rgba(110, 143, 74, 0.17), transparent 38%),
+    radial-gradient(circle at 20% 20%, rgba(143, 113, 60, 0.08), transparent 25%),
+    linear-gradient(145deg, #102317, #060d08 70%);
+  box-shadow: 0 24px 70px rgba(0, 6, 2, 0.48), inset 0 1px rgba(248, 243, 221, 0.04);
+}
+
+.brand-caption {
+  text-shadow: 0 2px 10px #001006, 0 0 24px rgba(110, 143, 74, 0.28);
+}
+
+.brand-caption::before {
+  background: linear-gradient(90deg, transparent, var(--amber), var(--accent-strong), transparent);
+}
+
+.brand-caption span,
+.eyebrow,
+.mode-icon {
+  color: var(--accent-strong);
+}
+
+.brand-caption h1 {
+  color: var(--cream);
+}
+
+.paper {
+  background: #f5f1df;
+  box-shadow: 0 18px 45px rgba(0, 6, 2, 0.58);
+}
+
+.paper i {
+  background: #c9d4bf;
+}
+
+.paper b {
+  color: #376a43;
+}
+
+.paper span {
+  background: #78ad28;
+  color: #07100b;
+}
+
+.orbit {
+  border-color: rgba(145, 189, 89, 0.22);
+}
+
+.format-strip span {
+  border-color: rgba(110, 143, 74, 0.28);
+  background: rgba(110, 143, 74, 0.055);
+  color: #dfe9d4;
+}
+
+.privacy-note {
+  border-color: rgba(110, 143, 74, 0.38);
+  background:
+    radial-gradient(circle at 9% 22%, rgba(144, 169, 110, 0.12), transparent 44%),
+    linear-gradient(135deg, rgba(16, 35, 23, 0.94), rgba(7, 17, 11, 0.97));
+  box-shadow: 0 18px 42px rgba(0, 7, 2, 0.32), inset 0 1px rgba(248, 243, 221, 0.04);
+}
+
+.privacy-mascot {
+  filter: drop-shadow(0 14px 22px rgba(0, 6, 2, 0.5));
+}
+
+.privacy-note p {
+  color: #b7c9b8;
+}
+
+.privacy-note li {
+  border-color: rgba(145, 189, 89, 0.25);
+  background: rgba(110, 143, 74, 0.09);
+  color: #b9cf91;
+}
+
+.sponsor-button {
+  border-color: rgba(242, 173, 40, 0.46);
+  background: rgba(143, 113, 60, 0.1);
+  color: #ffe2a5;
+}
+
+.sponsor-button span {
+  color: var(--amber-strong);
+}
+
+.sponsor-button:hover {
+  border-color: var(--amber-strong);
+  background: rgba(143, 113, 60, 0.17);
+  color: #fff1cf;
+}
+
+.tool-panel {
+  border-color: rgba(57, 86, 58, 0.68);
+  background:
+    linear-gradient(180deg, rgba(248, 243, 221, 0.035), transparent 22%),
+    var(--panel);
+  box-shadow: var(--shadow), inset 0 1px rgba(248, 243, 221, 0.04);
+}
+
+legend,
+.field > span,
+.check-field {
+  color: #e8ead7;
+}
+
+.mode-control strong,
+.drop-title {
+  color: var(--cream);
+}
+
+.mode-control > label > span,
+.drop-zone,
+.file-card,
+.segmented-control,
+.field input,
+.field select,
+.signature-picker,
+.color-control {
+  background-color: var(--panel-strong);
+}
+
+.mode-control span:hover {
+  border-color: rgba(145, 189, 89, 0.46);
+  background: rgba(110, 143, 74, 0.07);
+}
+
+.mode-control input:checked + span {
+  border-color: rgba(145, 189, 89, 0.64);
+  background: linear-gradient(180deg, rgba(110, 143, 74, 0.16), rgba(110, 143, 74, 0.055)), var(--panel-strong);
+  box-shadow: 0 10px 28px rgba(44, 92, 36, 0.26), inset 3px 0 var(--accent-strong);
+}
+
+.drop-zone {
+  background:
+    linear-gradient(180deg, rgba(110, 143, 74, 0.075), transparent 48%),
+    var(--panel-strong);
+}
+
+.drop-zone:hover,
+.drop-zone.is-dragging {
+  border-color: var(--accent-strong);
+  background:
+    linear-gradient(180deg, rgba(110, 143, 74, 0.13), transparent 60%),
+    var(--panel-strong);
+}
+
+.drop-icon,
+.drop-icon::before {
+  border-color: #7fae4c;
+}
+
+.drop-icon {
+  background: rgba(110, 143, 74, 0.08);
+}
+
+.drop-icon i::before {
+  background: var(--accent-strong);
+}
+
+.drop-icon i::after {
+  border-color: var(--accent-strong);
+}
+
+.quiet-button,
+.page-actions button {
+  border-color: var(--line);
+  background: #10271a;
+  color: #d5dfd1;
+}
+
+.quiet-button:hover,
+.page-actions button:hover {
+  border-color: var(--accent);
+  background: #173422;
+  color: var(--cream);
+}
+
+.page-item {
+  border-color: var(--line);
+  background: #06150d;
+}
+
+.page-number {
+  background: rgba(4, 24, 12, 0.88);
+  color: #f7f2da;
+  box-shadow: 0 0 0 1px rgba(145, 189, 89, 0.16);
+}
+
+.segmented-control input:checked + span {
+  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  color: var(--accent-ink);
+  box-shadow: 0 8px 24px rgba(42, 72, 38, 0.32);
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 4px rgba(110, 143, 74, 0.14);
+}
+
+.signature-picker {
+  color: #c9dabf;
+}
+
+.signature-picker:hover {
+  border-color: var(--accent-strong);
+  background: rgba(110, 143, 74, 0.07);
+}
+
+.field .color-control input[type="color"] {
+  background: #041008;
+}
+
+.color-control output {
+  color: #e1e9d8;
+}
+
+.primary-button {
+  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  color: var(--accent-ink);
+  box-shadow: 0 16px 34px rgba(28, 57, 30, 0.38);
+}
+
+.primary-button:hover {
+  background: linear-gradient(180deg, #a8be82, #78964b);
+  box-shadow: 0 18px 38px rgba(35, 66, 35, 0.42);
+}
+
+.primary-button:focus-visible,
+.quiet-button:focus-visible,
+.reset-floating-button:focus-visible,
+.result-card a:focus-visible,
+.sponsor-button:focus-visible,
+.footer-repository:focus-visible {
+  outline: 3px solid rgba(145, 189, 89, 0.42);
+  outline-offset: 3px;
+}
+
+.result-card {
+  border-color: rgba(145, 189, 89, 0.22);
+  background: rgba(110, 143, 74, 0.055);
+}
+
+.result-card a {
+  background: linear-gradient(180deg, var(--amber-strong), var(--amber));
+  color: #1b1303;
+}
+
+.result-card a:hover {
+  background: #e7b861;
+}
+
+.progress-track {
+  border-color: rgba(145, 189, 89, 0.09);
+  background: #031008;
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong) 62%, var(--amber));
+}
+
+#status-message {
+  color: #d8e1d3;
+}
+
+.site-footer {
+  border-top-color: rgba(110, 143, 74, 0.17);
+  color: #7f9685;
+}
+
+.site-footer a {
+  color: #b7c8b2;
+}
+
+.site-footer a:hover {
+  color: var(--accent-strong);
+}
+
+.reset-floating-button {
+  border-color: rgba(145, 189, 89, 0.38);
+  background: rgba(7, 28, 16, 0.92);
+  color: #eef3df;
+  box-shadow: 0 14px 34px rgba(0, 7, 2, 0.46);
+}
+
+.reset-floating-button:hover {
+  border-color: var(--accent-strong);
+  background: rgba(15, 48, 27, 0.96);
+}
+
+.reset-floating-button span {
+  color: var(--accent-strong);
+}
+
+* {
+  scrollbar-color: #426c3c #07150d;
+}
+
+@media (max-width: 700px) {
+  body {
+    background-position: 62% center;
+    background-attachment: scroll;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+}

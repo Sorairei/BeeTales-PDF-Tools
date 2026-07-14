@@ -124,7 +124,7 @@ export async function stampPdf(bytes, options) {
   if (options.kind === "watermark") {
     const text = String(options.text || "DRAFT").trim();
     if (!text) throw new Error("Enter watermark text.");
-    const watermarkColor = parseHexColor(options.color || "#7347ad");
+    const watermarkColor = parseHexColor(options.color || "#547040");
     pages.forEach((page) => {
       const { width, height } = page.getSize();
       const position = ["top", "center", "bottom", "full"].includes(options.position) ? options.position : "center";

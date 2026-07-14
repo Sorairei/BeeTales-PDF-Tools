@@ -67,7 +67,7 @@ flowchart LR
 
 | Layer | Files | Responsibility |
 | --- | --- | --- |
-| Interface | `index.html`, `style.css` | Tool selection, responsive layout, accessibility labels, page controls, and result downloads. |
+| Interface | `index.html`, `style.css`, `theme.css` | Tool selection, responsive layout, accessibility labels, page controls, result downloads, and the BeeTales swamp-green design system. |
 | Application | `app.js` | File handling, adaptive previews, live overlays, drag and drop, cancellation, state management, validation, and user feedback. |
 | PDF operations | `core.mjs` | Safe page ranges, copying, rotation, splitting, numbering, watermark placement, and proportional signature sizing. |
 | Rendering | `vendor/pdfjs/` | Local high-resolution PDF page rendering and thumbnail generation. |
@@ -81,13 +81,15 @@ flowchart LR
 BeeTales-PDF-Tools/
 |-- index.html
 |-- style.css
+|-- theme.css
 |-- app.js
 |-- core.mjs
 |-- favicon.ico
 |-- favicon.png
 |-- assets/
 |   |-- beetales-logo-v2.png
-|   `-- sora-avatar.png
+|   |-- sora-avatar.png
+|   `-- swamp-space.png
 |-- vendor/
 |   |-- pdf-lib/
 |   `-- pdfjs/
@@ -115,7 +117,7 @@ BeeTales-PDF-Tools/
 | Technology | Purpose |
 | --- | --- |
 | HTML5 | Semantic structure, file inputs, forms, and accessible controls. |
-| CSS | BeeTales visual identity and responsive desktop/mobile layouts. |
+| CSS | Responsive desktop/mobile layouts plus a maintainable forest-green, cream, and amber BeeTales brand theme. |
 | JavaScript modules | Local application state and browser-side processing. |
 | [pdf-lib](https://github.com/Hopding/pdf-lib) | Create, copy, modify, number, watermark, and sign PDF documents. |
 | [PDF.js](https://github.com/mozilla/pdf.js) | Render local PDF page previews. |
