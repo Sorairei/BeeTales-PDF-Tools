@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BeeTales PDF Tools</title>
+    <meta name="description" content="Merge, split, reorder, rotate, sign, and create PDFs privately in your browser." />
+    <meta name="theme-color" content="#080b12" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace" aria-labelledby="app-title">
+        <div class="intro">
+          <div class="brand-mark" aria-label="BeeTales">
+            <img src="assets/beetales-logo.svg" alt="BeeTales logo" width="96" height="96" />
+            <div><p>BeeTales</p><span>Local PDF toolkit</span></div>
+          </div>
+
+          <figure class="brand-visual" aria-label="A stack of PDF documents being organized">
+            <div class="document-scene" aria-hidden="true">
+              <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+              <div class="paper paper-back"><i></i><i></i><i></i></div>
+              <div class="paper paper-mid"><i></i><i></i><i></i></div>
+              <div class="paper paper-front"><b>PDF</b><i></i><i></i><i></i><span>✓</span></div>
+            </div>
+            <figcaption class="brand-caption"><span>BeeTales</span><h1 id="app-title">PDF Tools</h1></figcaption>
+          </figure>
+
+          <p class="lead">Organize, split, create, and sign PDF files directly in your browser.</p>
+          <div class="format-strip" aria-label="Available PDF actions">
+            <span>MERGE</span><span>SPLIT</span><span>ROTATE</span><span>SIGN</span>
+          </div>
+          <div class="privacy-note" role="note">
+            <div class="privacy-shield" aria-hidden="true">✓</div>
+            <div>
+              <strong>Private by design</strong>
+              <p>Your files never leave this device. No uploads, accounts, or document server.</p>
+              <ul aria-label="Privacy benefits"><li>100% local</li><li>No registration</li><li>Browser only</li></ul>
+              <a class="sponsor-button" href="https://github.com/sponsors/Sorairei" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">♥</span> Sponsor on GitHub</a>
+            </div>
+          </div>
+        </div>
+
+        <form class="tool-panel" id="tool-form">
+          <fieldset class="mode-fieldset">
+            <legend>Choose a tool</legend>
+            <div class="mode-control">
+              <label><input type="radio" name="mode" value="organize" checked /><span><b class="mode-icon">⇄</b><strong>Organize & merge</strong><small>Reorder, rotate, remove, or join pages</small></span></label>
+              <label><input type="radio" name="mode" value="extract" /><span><b class="mode-icon">✂</b><strong>Split & extract</strong><small>Keep, remove, or split selected pages</small></span></label>
+              <label><input type="radio" name="mode" value="images" /><span><b class="mode-icon">▧</b><strong>Images to PDF</strong><small>Turn JPG or PNG files into one PDF</small></span></label>
+              <label><input type="radio" name="mode" value="stamp" /><span><b class="mode-icon">✎</b><strong>Number, mark & sign</strong><small>Add page numbers, a watermark, or signature</small></span></label>
+            </div>
+          </fieldset>
+
+          <label class="drop-zone" for="file-input" id="drop-zone">
+            <input id="file-input" type="file" accept="application/pdf,.pdf" multiple />
+            <span class="drop-icon" aria-hidden="true"><i></i></span>
+            <span class="drop-title" id="drop-title">Select one or more PDF files</span>
+            <span class="drop-hint" id="drop-hint">You can also drag and drop them here</span>
+          </label>
+
+          <section class="file-card is-hidden" id="file-card" aria-live="polite">
+            <div><p class="eyebrow">Local workspace</p><h2 id="file-summary">No files selected</h2><p id="file-size"></p></div>
+            <button class="quiet-button" id="clear-files" type="button">Clear</button>
+          </section>
+
+          <section class="pages-section is-hidden" id="pages-section">
+            <div class="section-heading"><div><p class="eyebrow">Page preview</p><h2 id="pages-title">Arrange pages</h2></div><span id="pages-count"></span></div>
+            <p class="section-help" id="pages-help">Drag pages to reorder them. Use the buttons on each page to rotate or remove it.</p>
+            <ol class="page-grid" id="page-grid"></ol>
+          </section>
+
+          <section class="settings-card is-hidden" id="extract-settings">
+            <fieldset><legend>What should happen?</legend><div class="segmented-control three"><label><input type="radio" name="extract-action" value="extract" checked /><span>Extract</span></label><label><input type="radio" name="extract-action" value="remove" /><span>Remove</span></label><label><input type="radio" name="extract-action" value="split" /><span>Split</span></label></div></fieldset>
+            <label class="field"><span>Pages</span><input id="page-selection" type="text" inputmode="numeric" placeholder="Example: 1-3, 5, 8" /><small id="selection-help">Enter the pages to keep in a new PDF.</small></label>
+          </section>
+
+          <section class="settings-card is-hidden" id="image-settings">
+            <div class="settings-grid">
+              <label class="field"><span>Page size</span><select id="page-size"><option value="image">Fit each image</option><option value="a4">A4</option><option value="letter">Letter</option></select></label>
+              <label class="field"><span>Margin</span><select id="image-margin"><option value="0">None</option><option value="24" selected>Small</option><option value="48">Large</option></select></label>
+            </div>
+            <p class="setting-note">Images are fitted without cropping. JPG files keep their original compression.</p>
+          </section>
+
+          <section class="settings-card is-hidden" id="stamp-settings">
+            <fieldset><legend>Add to the document</legend><div class="segmented-control three"><label><input type="radio" name="stamp-kind" value="numbers" checked /><span>Numbers</span></label><label><input type="radio" name="stamp-kind" value="watermark" /><span>Watermark</span></label><label><input type="radio" name="stamp-kind" value="signature" /><span>Signature</span></label></div></fieldset>
+            <div class="stamp-options" id="number-options"><div class="settings-grid"><label class="field"><span>Start at</span><input id="number-start" type="number" min="0" value="1" /></label><label class="field"><span>Position</span><select id="number-position"><option value="bottom-center">Bottom center</option><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-center">Top center</option></select></label></div></div>
+            <div class="stamp-options is-hidden" id="watermark-options"><label class="field"><span>Watermark text</span><input id="watermark-text" type="text" maxlength="80" value="DRAFT" /></label><div class="settings-grid"><label class="field"><span>Size</span><select id="watermark-size"><option value="42">Small</option><option value="54" selected>Medium</option><option value="72">Large</option></select></label><label class="field"><span>Opacity</span><select id="watermark-opacity"><option value="0.12">Light</option><option value="0.18" selected>Medium</option><option value="0.28">Strong</option></select></label></div></div>
+            <div class="stamp-options is-hidden" id="signature-options"><label class="signature-picker" for="signature-input"><input id="signature-input" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" /><span id="signature-label">Choose a PNG or JPG signature</span></label><div class="settings-grid"><label class="field"><span>Page</span><input id="signature-page" type="number" min="1" value="1" /></label><label class="field"><span>Position</span><select id="signature-position"><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-right">Top right</option><option value="top-left">Top left</option></select></label></div><label class="check-field"><input id="signature-all" type="checkbox" /><span>Place on every page</span></label></div>
+          </section>
+
+          <div class="actions"><button class="primary-button" id="process-button" type="submit">Create organized PDF</button></div>
+
+          <section class="results-panel is-hidden" id="results-panel" aria-live="polite">
+            <div class="results-heading"><div><p class="eyebrow">Completed</p><h2 id="results-title">Your PDF is ready</h2></div><span class="success-mark">✓ Local</span></div>
+            <div class="results-list" id="results-list"></div>
+          </section>
+
+          <div class="status-area" aria-live="polite"><div class="progress-track" aria-hidden="true"><div class="progress-bar" id="progress-bar"></div></div><p id="status-message">Choose a PDF to get started.</p><p class="error-message is-hidden" id="error-message"></p></div>
+        </form>
+      </section>
+
+      <footer class="site-footer"><p>&copy; 2026 <a href="https://github.com/Sorairei" target="_blank" rel="noopener noreferrer">Sorairei</a>. Open-source software under the <a href="LICENSE">MIT License</a>.</p><a class="footer-repository" href="https://github.com/Sorairei" target="_blank" rel="noopener noreferrer">View source on GitHub</a></footer>
+    </main>
+    <button class="reset-floating-button" id="reset-button" type="button" aria-label="Reset the tool"><span aria-hidden="true">↻</span> Reset</button>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

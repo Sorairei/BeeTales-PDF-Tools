@@ -1,0 +1,16 @@
+{
+  "name": "beetales-pdf-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private, browser-based PDF tools that run entirely on the user's device.",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "test": "node --test",
+    "serve": "node scripts/serve.mjs"
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "5.3.93"
+  }
+}
