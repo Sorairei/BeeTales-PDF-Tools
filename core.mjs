@@ -12,6 +12,10 @@ export function parsePageSelection(input, pageCount) {
       const start = Number(range[1]);
       const end = Number(range[2]);
       if (start > end) throw new Error(`Page range ${part} is backwards.`);
+      if (start < 1 || end > pageCount) {
+        const invalid = start < 1 ? start : end;
+        throw new Error(`Page ${invalid} is outside this ${pageCount}-page PDF.`);
+      }
       for (let page = start; page <= end; page += 1) selected.push(page);
       continue;
     }
@@ -51,6 +55,17 @@ export function calculateWatermarkPlacement(pageWidth, pageHeight, textWidth, te
       ? margin
       : (pageHeight - boundingHeight) / 2;
   return { x, y, boundingWidth, boundingHeight };
+}
+
+export function fitImageWithinPage(imageWidth, imageHeight, pageWidth, pageHeight, preferredWidth = 150, margin = 30) {
+  if (![imageWidth, imageHeight, pageWidth, pageHeight].every((value) => Number.isFinite(value) && value > 0)) {
+    throw new Error("The signature image or PDF page has invalid dimensions.");
+  }
+  const availableWidth = Math.max(1, pageWidth - margin * 2);
+  const availableHeight = Math.max(1, pageHeight - margin * 2);
+  const requestedWidth = Math.max(1, Math.min(Number(preferredWidth) || 150, 260));
+  const scale = Math.min(requestedWidth / imageWidth, availableWidth / imageWidth, availableHeight / imageHeight);
+  return { width: imageWidth * scale, height: imageHeight * scale };
 }
 
 export async function buildPdfFromPages(sources, pageItems) {
@@ -138,13 +153,13 @@ export async function stampPdf(bytes, options) {
     const image = options.imageType === "image/png"
       ? await document.embedPng(options.imageBytes)
       : await document.embedJpg(options.imageBytes);
-    const targetWidth = Math.min(Number(options.signatureWidth || 150), 260);
-    const ratio = targetWidth / image.width;
-    const targetHeight = image.height * ratio;
     const targetPages = options.allPages ? pages : [pages[Math.max(0, Number(options.page || 1) - 1)]].filter(Boolean);
     if (!targetPages.length) throw new Error("The selected signature page does not exist.");
     targetPages.forEach((page) => {
-      const { width } = page.getSize();
+      const { width, height } = page.getSize();
+      const fitted = fitImageWithinPage(image.width, image.height, width, height, options.signatureWidth || 150, 30);
+      const targetWidth = fitted.width;
+      const targetHeight = fitted.height;
       const { x, y } = textPosition(page, targetWidth, targetHeight, options.position || "bottom-right", 30);
       page.drawImage(image, { x, y, width: targetWidth, height: targetHeight, opacity: Number(options.opacity || 1) });
     });

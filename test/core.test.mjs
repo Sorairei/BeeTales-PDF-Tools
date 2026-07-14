@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "../vendor/pdf-lib/pdf-lib.esm.min.js";
-import { buildPdfFromPages, calculateWatermarkPlacement, parseHexColor, parsePageSelection, stampPdf } from "../core.mjs";
+import { buildPdfFromPages, calculateWatermarkPlacement, createSplitPdfs, fitImageWithinPage, parseHexColor, parsePageSelection, stampPdf } from "../core.mjs";
 
 test("page selections accept ranges, spaces, and duplicates", () => {
   assert.deepEqual(parsePageSelection("1-3, 3, 5", 5), [0, 1, 2, 4]);
   assert.throws(() => parsePageSelection("6", 5), /outside/);
   assert.throws(() => parsePageSelection("4-2", 5), /backwards/);
+  assert.throws(() => parsePageSelection("1-999999999", 5), /outside/);
 });
 
 test("watermark colors are converted from hex to PDF RGB values", () => {
@@ -21,6 +22,13 @@ test("watermarks can be placed at the top, center, or bottom", () => {
   assert.ok(top.y > center.y);
   assert.ok(center.y > bottom.y);
   assert.equal(bottom.y, 30);
+});
+
+test("tall signature images are fitted inside the PDF page", () => {
+  const fitted = fitImageWithinPage(100, 2000, 600, 800, 150, 30);
+  assert.ok(fitted.width <= 540);
+  assert.ok(fitted.height <= 740);
+  assert.equal(fitted.height, 740);
 });
 
 test("pages can be copied, reordered, and rotated", async () => {
@@ -46,4 +54,13 @@ test("page numbers are added without changing page count", async () => {
   const stamped = await stampPdf(await source.save(), { kind: "numbers", startAt: 1, position: "bottom-center" });
   const result = await PDFDocument.load(stamped);
   assert.equal(result.getPageCount(), 2);
+});
+
+test("selected pages can be split into independent PDFs", async () => {
+  const source = await PDFDocument.create();
+  source.addPage([300, 400]);
+  source.addPage([500, 600]);
+  const outputs = await createSplitPdfs(source, [0, 1]);
+  assert.equal(outputs.length, 2);
+  for (const bytes of outputs) assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
 });

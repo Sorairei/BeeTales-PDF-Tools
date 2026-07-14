@@ -31,6 +31,9 @@ let imageItems = [];
 let resultUrls = [];
 let draggedId = null;
 let signatureFile = null;
+let loadGeneration = 0;
+let isProcessing = false;
+const activeLoadingTasks = new Set();
 
 function bytesLabel(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -43,18 +46,55 @@ function showError(error) { elements.error.textContent = error instanceof Error 
 function clearError() { elements.error.textContent = ""; elements.error.classList.add("is-hidden"); }
 function activeValue(name) { return document.querySelector(`input[name="${name}"]:checked`)?.value; }
 function revokeResults() { resultUrls.forEach(URL.revokeObjectURL); resultUrls = []; elements.resultsList.replaceChildren(); elements.results.classList.add("is-hidden"); }
+function setProcessingBusy(busy) {
+  isProcessing = busy;
+  elements.process.disabled = busy;
+  elements.reset.disabled = busy;
+  elements.clear.disabled = busy;
+  elements.input.disabled = busy;
+  elements.modeInputs.forEach((input) => { input.disabled = busy; });
+}
+
+async function disposeLoaded(sourceList = [], images = []) {
+  await Promise.allSettled(sourceList.map((source) => source.preview?.destroy?.()));
+  images.forEach((item) => URL.revokeObjectURL(item.url));
+}
+
+async function cancelActiveLoads() {
+  const tasks = [...activeLoadingTasks];
+  activeLoadingTasks.clear();
+  await Promise.allSettled(tasks.map((task) => task.destroy()));
+}
 
 async function destroySources() {
-  for (const source of sources) await source.preview?.destroy?.().catch(() => {});
-  imageItems.forEach((item) => URL.revokeObjectURL(item.url));
+  const previousSources = sources;
+  const previousImages = imageItems;
   sources = []; pageItems = []; imageItems = [];
+  await disposeLoaded(previousSources, previousImages);
 }
 
 async function resetWorkspace({ keepMode = true } = {}) {
-  await destroySources(); revokeResults(); clearError(); signatureFile = null; elements.signatureInput.value = ""; elements.signatureLabel.textContent = "Choose a PNG or JPG signature";
+  loadGeneration += 1;
+  await cancelActiveLoads();
+  await destroySources(); revokeResults(); clearError(); signatureFile = null;
+  if (!keepMode) elements.form.reset();
+  elements.signatureInput.value = ""; elements.signatureLabel.textContent = "Choose a PNG or JPG signature";
   elements.input.value = ""; elements.pageSelection.value = ""; elements.pageGrid.replaceChildren(); elements.fileCard.classList.add("is-hidden"); elements.pagesSection.classList.add("is-hidden");
-  if (!keepMode) { mode = "organize"; elements.modeInputs.find((item) => item.value === mode).checked = true; }
+  if (!keepMode) mode = activeValue("mode") || "organize";
+  elements.resultsTitle.textContent = "Your PDF is ready";
+  syncOptionPanels();
   applyMode();
+}
+
+function syncOptionPanels() {
+  const extractAction = activeValue("extract-action") || "extract";
+  const extractCopy = { extract: "Enter the pages to keep in a new PDF.", remove: "Enter the pages to remove from the PDF.", split: "Enter the pages that should become separate PDF files." };
+  elements.selectionHelp.textContent = extractCopy[extractAction];
+  const stampKind = activeValue("stamp-kind") || "numbers";
+  elements.numberOptions.classList.toggle("is-hidden", stampKind !== "numbers");
+  elements.watermarkOptions.classList.toggle("is-hidden", stampKind !== "watermark");
+  elements.signatureOptions.classList.toggle("is-hidden", stampKind !== "signature");
+  document.querySelector("#watermark-color-value").textContent = document.querySelector("#watermark-color").value.toUpperCase();
 }
 
 function applyMode() {
@@ -78,52 +118,119 @@ function validFiles(files) {
 }
 
 async function loadFiles(fileList) {
-  clearError(); revokeResults(); await destroySources(); elements.pageGrid.replaceChildren();
-  const files = validFiles(fileList);
-  if (!files.length) return;
-  elements.process.disabled = true; setStatus(`Opening ${files.length} local ${files.length === 1 ? "file" : "files"}…`, 12);
+  if (isProcessing) return;
+  const requestedMode = mode;
+  let files;
   try {
-    if (mode === "images") await loadImages(files); else await loadPdfs(files);
+    files = validFiles(fileList);
+  } catch (error) {
+    showError(error);
+    return;
+  }
+  if (!files.length) return;
+  const requestId = ++loadGeneration;
+  clearError(); revokeResults(); elements.process.disabled = true; setStatus(`Opening ${files.length} local ${files.length === 1 ? "file" : "files"}…`, 12);
+  await cancelActiveLoads();
+  await destroySources();
+  elements.pageGrid.replaceChildren();
+  let loaded = null;
+  try {
+    loaded = requestedMode === "images" ? loadImages(files) : await loadPdfs(files);
+    if (requestId !== loadGeneration || requestedMode !== mode) {
+      await disposeLoaded(loaded.sources, loaded.imageItems);
+      return;
+    }
+    sources = loaded.sources;
+    pageItems = loaded.pageItems;
+    imageItems = loaded.imageItems;
+    elements.pagesTitle.textContent = requestedMode === "images" ? "Arrange images" : requestedMode === "organize" ? "Arrange pages" : "Document preview";
+    elements.pagesHelp.textContent = requestedMode === "images" ? "Drag images into the order they should appear in the PDF." : requestedMode === "organize" ? "Drag pages to reorder them. Use the buttons to rotate or remove pages." : "Use this preview to identify the page numbers you need.";
     elements.fileCard.classList.remove("is-hidden"); elements.pagesSection.classList.remove("is-hidden");
     elements.fileSummary.textContent = files.length === 1 ? files[0].name : `${files.length} files selected`;
-    elements.fileSize.textContent = `${pageItems.length || imageItems.length} ${mode === "images" ? "images" : "pages"} · ${bytesLabel(files.reduce((sum, file) => sum + file.size, 0))}`;
-    await renderItems(); setStatus("Ready. Review your pages, then create the result.", 0);
-  } catch (error) { await destroySources(); elements.fileCard.classList.add("is-hidden"); elements.pagesSection.classList.add("is-hidden"); showError(error); setStatus(modeConfig[mode].idle, 0); }
-  finally { elements.process.disabled = false; }
+    elements.fileSize.textContent = `${pageItems.length || imageItems.length} ${requestedMode === "images" ? "images" : "pages"} · ${bytesLabel(files.reduce((sum, file) => sum + file.size, 0))}`;
+    await renderItems(requestId);
+    if (requestId !== loadGeneration) return;
+    setStatus("Ready. Review your pages, then create the result.", 0);
+  } catch (error) {
+    if (requestId === loadGeneration && requestedMode === mode) {
+      await destroySources(); elements.fileCard.classList.add("is-hidden"); elements.pagesSection.classList.add("is-hidden"); showError(error); setStatus(modeConfig[mode].idle, 0);
+    }
+  } finally {
+    if (requestId === loadGeneration) elements.process.disabled = false;
+  }
 }
 
 async function loadPdfs(files) {
-  for (let sourceIndex = 0; sourceIndex < files.length; sourceIndex += 1) {
-    const file = files[sourceIndex]; const bytes = new Uint8Array(await file.arrayBuffer());
-    let document;
-    try { document = await PDFDocument.load(bytes, { ignoreEncryption: false }); }
-    catch { throw new Error(`${file.name} could not be opened. Password-protected PDFs are not supported.`); }
-    const preview = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-    sources.push({ file, bytes, document, preview });
-    for (let pageIndex = 0; pageIndex < document.getPageCount(); pageIndex += 1) pageItems.push({ id: crypto.randomUUID(), sourceIndex, pageIndex, rotation: document.getPage(pageIndex).getRotation().angle || 0 });
+  const loadedSources = [];
+  const loadedPages = [];
+  try {
+    for (let sourceIndex = 0; sourceIndex < files.length; sourceIndex += 1) {
+      const file = files[sourceIndex]; const bytes = new Uint8Array(await file.arrayBuffer());
+      let document;
+      try { document = await PDFDocument.load(bytes, { ignoreEncryption: false }); }
+      catch { throw new Error(`${file.name} could not be opened. It may be damaged or password-protected.`); }
+      const loadingTask = pdfjsLib.getDocument({ data: bytes.slice() });
+      activeLoadingTasks.add(loadingTask);
+      let preview;
+      try { preview = await loadingTask.promise; }
+      finally { activeLoadingTasks.delete(loadingTask); }
+      loadedSources.push({ file, bytes, document, preview });
+      for (let pageIndex = 0; pageIndex < document.getPageCount(); pageIndex += 1) loadedPages.push({ id: crypto.randomUUID(), sourceIndex, pageIndex, rotation: document.getPage(pageIndex).getRotation().angle || 0 });
+    }
+    return { sources: loadedSources, pageItems: loadedPages, imageItems: [] };
+  } catch (error) {
+    await disposeLoaded(loadedSources, []);
+    throw error;
   }
-  elements.pagesTitle.textContent = mode === "organize" ? "Arrange pages" : "Document preview";
-  elements.pagesHelp.textContent = mode === "organize" ? "Drag pages to reorder them. Use the buttons to rotate or remove pages." : "Use this preview to identify the page numbers you need.";
 }
 
-async function loadImages(files) {
-  imageItems = files.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
-  elements.pagesTitle.textContent = "Arrange images"; elements.pagesHelp.textContent = "Drag images into the order they should appear in the PDF.";
+function loadImages(files) {
+  return { sources: [], pageItems: [], imageItems: files.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) })) };
 }
 
-async function renderItems() {
-  elements.pageGrid.replaceChildren(); const items = mode === "images" ? imageItems : pageItems;
+async function renderPdfCanvas(item, canvas) {
+  if (canvas.renderTask) {
+    canvas.renderTask.cancel();
+    await canvas.renderTask.promise.catch(() => {});
+  }
+  const pdfPage = await sources[item.sourceIndex].preview.getPage(item.pageIndex + 1);
+  const viewport = pdfPage.getViewport({ scale: .38, rotation: item.rotation });
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const renderTask = pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport });
+  canvas.renderTask = renderTask;
+  try { await renderTask.promise; }
+  finally { if (canvas.renderTask === renderTask) delete canvas.renderTask; }
+}
+
+function updatePageGridMetadata() {
+  const items = mode === "images" ? imageItems : pageItems;
   elements.pagesCount.textContent = `${items.length} ${mode === "images" ? (items.length === 1 ? "image" : "images") : (items.length === 1 ? "page" : "pages")}`;
+  [...elements.pageGrid.children].forEach((element, index) => { element.querySelector(".page-number").textContent = String(index + 1); });
+}
+
+function syncPageGridOrder() {
+  const items = mode === "images" ? imageItems : pageItems;
+  const elementsById = new Map([...elements.pageGrid.children].map((element) => [element.dataset.id, element]));
+  items.forEach((item) => elements.pageGrid.append(elementsById.get(item.id)));
+  updatePageGridMetadata();
+}
+
+async function renderItems(expectedGeneration = loadGeneration) {
+  elements.pageGrid.replaceChildren(); const items = [...(mode === "images" ? imageItems : pageItems)];
+  updatePageGridMetadata();
   for (let index = 0; index < items.length; index += 1) {
+    if (expectedGeneration !== loadGeneration) return;
     const item = items[index]; const li = document.createElement("li"); li.className = "page-item"; li.dataset.id = item.id; li.draggable = mode === "organize" || mode === "images";
     const preview = document.createElement("div"); preview.className = "page-preview";
     const badge = document.createElement("span"); badge.className = "page-number"; badge.textContent = String(index + 1); preview.append(badge);
     if (mode === "images") { const image = document.createElement("img"); image.className = "image-preview"; image.src = item.url; image.alt = item.file.name; preview.append(image); }
     else {
       const canvas = document.createElement("canvas"); preview.append(canvas);
-      try { const pdfPage = await sources[item.sourceIndex].preview.getPage(item.pageIndex + 1); const viewport = pdfPage.getViewport({ scale: .38, rotation: item.rotation }); canvas.width = viewport.width; canvas.height = viewport.height; await pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise; }
+      try { await renderPdfCanvas(item, canvas); }
       catch { preview.append(document.createTextNode("Preview unavailable")); }
     }
+    if (expectedGeneration !== loadGeneration) return;
     li.append(preview);
     if (mode === "organize") {
       const actions = document.createElement("div"); actions.className = "page-actions";
@@ -153,9 +260,10 @@ function addResult(bytes, filename, detail) {
 }
 
 async function processFiles() {
+  if (isProcessing) return;
   clearError(); revokeResults();
   if ((mode === "images" ? imageItems : pageItems).length === 0) throw new Error(mode === "images" ? "Choose at least one image first." : "Choose a PDF first.");
-  elements.process.disabled = true; setStatus("Processing locally in your browser…", 28);
+  setProcessingBusy(true); setStatus("Processing locally in your browser…", 28);
   try {
     if (mode === "organize") {
       const bytes = await buildPdfFromPages(sources, pageItems); addResult(bytes, safePdfName(sources[0].file.name, sources.length > 1 ? "merged" : "organized"), `${pageItems.length} pages`);
@@ -173,7 +281,7 @@ async function processFiles() {
       const bytes = await stampPdf(sources[0].bytes, options); addResult(bytes, safePdfName(sources[0].file.name, kind === "numbers" ? "numbered" : kind === "watermark" ? "watermarked" : "signed"), `${pageItems.length} pages`);
     }
     elements.results.classList.remove("is-hidden"); if (mode !== "extract" || activeValue("extract-action") !== "split") elements.resultsTitle.textContent = "Your PDF is ready"; setStatus("Done. Your file stayed on this device.", 100); elements.results.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  } finally { elements.process.disabled = false; }
+  } finally { setProcessingBusy(false); }
 }
 
 elements.modeInputs.forEach((input) => input.addEventListener("change", async () => { mode = input.value; await resetWorkspace({ keepMode: true }); }));
@@ -182,15 +290,16 @@ elements.dropZone.addEventListener("dragover", (event) => { event.preventDefault
 elements.dropZone.addEventListener("dragleave", () => elements.dropZone.classList.remove("is-dragging"));
 elements.dropZone.addEventListener("drop", (event) => { event.preventDefault(); elements.dropZone.classList.remove("is-dragging"); loadFiles(event.dataTransfer.files); });
 elements.clear.addEventListener("click", () => resetWorkspace({ keepMode: true })); elements.reset.addEventListener("click", () => resetWorkspace({ keepMode: false }));
-elements.form.addEventListener("submit", (event) => { event.preventDefault(); processFiles().catch((error) => { showError(error); setStatus("Please review the highlighted issue.", 0); elements.process.disabled = false; }); });
-elements.pageGrid.addEventListener("click", async (event) => { const button = event.target.closest("button[data-action]"); if (!button) return; const item = pageItems.find((entry) => entry.id === button.closest(".page-item").dataset.id); if (!item) return; if (button.dataset.action === "remove") pageItems = pageItems.filter((entry) => entry !== item); else item.rotation = (item.rotation + (button.dataset.action === "right" ? 90 : 270)) % 360; if (!pageItems.length) { elements.pagesSection.classList.add("is-hidden"); showError("All pages were removed. Clear the file or choose another PDF."); } else await renderItems(); });
+elements.form.addEventListener("submit", (event) => { event.preventDefault(); processFiles().catch((error) => { showError(error); setStatus("Please review the highlighted issue.", 0); setProcessingBusy(false); }); });
+elements.pageGrid.addEventListener("click", async (event) => { const button = event.target.closest("button[data-action]"); if (!button) return; const itemElement = button.closest(".page-item"); const item = pageItems.find((entry) => entry.id === itemElement.dataset.id); if (!item) return; if (button.dataset.action === "remove") { pageItems = pageItems.filter((entry) => entry !== item); itemElement.remove(); updatePageGridMetadata(); } else { item.rotation = (item.rotation + (button.dataset.action === "right" ? 90 : 270)) % 360; const canvas = itemElement.querySelector("canvas"); try { await renderPdfCanvas(item, canvas); } catch { showError("This page preview could not be refreshed, but the rotation is still saved."); } } if (!pageItems.length) { elements.pagesSection.classList.add("is-hidden"); showError("All pages were removed. Clear the file or choose another PDF."); } });
 elements.pageGrid.addEventListener("dragstart", (event) => { const item = event.target.closest(".page-item"); if (!item) return; draggedId = item.dataset.id; item.classList.add("is-dragging"); });
 elements.pageGrid.addEventListener("dragend", (event) => { event.target.closest(".page-item")?.classList.remove("is-dragging"); draggedId = null; });
 elements.pageGrid.addEventListener("dragover", (event) => event.preventDefault());
-elements.pageGrid.addEventListener("drop", async (event) => { event.preventDefault(); const target = event.target.closest(".page-item"); if (!target || !draggedId || target.dataset.id === draggedId) return; const list = mode === "images" ? imageItems : pageItems; const from = list.findIndex((item) => item.id === draggedId); const to = list.findIndex((item) => item.id === target.dataset.id); const [moved] = list.splice(from, 1); list.splice(to, 0, moved); await renderItems(); });
-document.querySelectorAll('input[name="extract-action"]').forEach((input) => input.addEventListener("change", () => { const copy = { extract: "Enter the pages to keep in a new PDF.", remove: "Enter the pages to remove from the PDF.", split: "Enter the pages that should become separate PDF files." }; elements.selectionHelp.textContent = copy[input.value]; }));
-document.querySelectorAll('input[name="stamp-kind"]').forEach((input) => input.addEventListener("change", () => { elements.numberOptions.classList.toggle("is-hidden", input.value !== "numbers"); elements.watermarkOptions.classList.toggle("is-hidden", input.value !== "watermark"); elements.signatureOptions.classList.toggle("is-hidden", input.value !== "signature"); }));
+elements.pageGrid.addEventListener("drop", (event) => { event.preventDefault(); const target = event.target.closest(".page-item"); if (!target || !draggedId || target.dataset.id === draggedId) return; const list = mode === "images" ? imageItems : pageItems; const from = list.findIndex((item) => item.id === draggedId); const to = list.findIndex((item) => item.id === target.dataset.id); if (from < 0 || to < 0) return; const [moved] = list.splice(from, 1); list.splice(to, 0, moved); syncPageGridOrder(); });
+document.querySelectorAll('input[name="extract-action"]').forEach((input) => input.addEventListener("change", syncOptionPanels));
+document.querySelectorAll('input[name="stamp-kind"]').forEach((input) => input.addEventListener("change", syncOptionPanels));
 elements.signatureInput.addEventListener("change", () => { signatureFile = elements.signatureInput.files[0] || null; elements.signatureLabel.textContent = signatureFile ? signatureFile.name : "Choose a PNG or JPG signature"; });
 document.querySelector("#watermark-color").addEventListener("input", (event) => { document.querySelector("#watermark-color-value").textContent = event.target.value.toUpperCase(); });
 
+syncOptionPanels();
 applyMode();
