@@ -31,6 +31,7 @@ let imageItems = [];
 let resultUrls = [];
 let draggedId = null;
 let signatureFile = null;
+let signaturePreviewUrl = null;
 let loadGeneration = 0;
 let isProcessing = false;
 const activeLoadingTasks = new Set();
@@ -54,6 +55,10 @@ function setProcessingBusy(busy) {
   elements.input.disabled = busy;
   elements.modeInputs.forEach((input) => { input.disabled = busy; });
 }
+function revokeSignaturePreview() {
+  if (signaturePreviewUrl) URL.revokeObjectURL(signaturePreviewUrl);
+  signaturePreviewUrl = null;
+}
 
 async function disposeLoaded(sourceList = [], images = []) {
   await Promise.allSettled(sourceList.map((source) => source.preview?.destroy?.()));
@@ -76,7 +81,7 @@ async function destroySources() {
 async function resetWorkspace({ keepMode = true } = {}) {
   loadGeneration += 1;
   await cancelActiveLoads();
-  await destroySources(); revokeResults(); clearError(); signatureFile = null;
+  await destroySources(); revokeResults(); clearError(); signatureFile = null; revokeSignaturePreview();
   if (!keepMode) elements.form.reset();
   elements.signatureInput.value = ""; elements.signatureLabel.textContent = "Choose a PNG or JPG signature";
   elements.input.value = ""; elements.pageSelection.value = ""; elements.pageGrid.replaceChildren(); elements.fileCard.classList.add("is-hidden"); elements.pagesSection.classList.add("is-hidden");
@@ -95,6 +100,63 @@ function syncOptionPanels() {
   elements.watermarkOptions.classList.toggle("is-hidden", stampKind !== "watermark");
   elements.signatureOptions.classList.toggle("is-hidden", stampKind !== "signature");
   document.querySelector("#watermark-color-value").textContent = document.querySelector("#watermark-color").value.toUpperCase();
+  updateStampPreviews();
+}
+
+function updateStampPreviews() {
+  const overlays = [...elements.pageGrid.querySelectorAll(".page-stamp-overlay")];
+  overlays.forEach((overlay) => overlay.replaceChildren());
+  if (mode !== "stamp" || !overlays.length) return;
+  const kind = activeValue("stamp-kind") || "numbers";
+
+  overlays.forEach((overlay, index) => {
+    if (kind === "numbers") {
+      const startAt = Number(document.querySelector("#number-start").value);
+      const number = document.createElement("span");
+      number.className = `stamp-number stamp-${document.querySelector("#number-position").value}`;
+      number.textContent = String(index + (Number.isFinite(startAt) ? startAt : 1));
+      overlay.append(number);
+      return;
+    }
+
+    if (kind === "watermark") {
+      const text = document.querySelector("#watermark-text").value.trim();
+      if (!text) return;
+      const position = document.querySelector("#watermark-position").value;
+      const color = document.querySelector("#watermark-color").value;
+      const opacity = Number(document.querySelector("#watermark-opacity").value);
+      const size = Number(document.querySelector("#watermark-size").value);
+      const previewSize = Math.max(.58, Math.min(1.05, size / 66));
+      if (position === "full") {
+        const pattern = document.createElement("div");
+        pattern.className = "stamp-watermark-pattern";
+        pattern.style.color = color;
+        pattern.style.opacity = String(opacity);
+        pattern.style.setProperty("--preview-watermark-size", `${Math.max(.48, previewSize * .68)}rem`);
+        for (let item = 0; item < 10; item += 1) { const label = document.createElement("span"); label.textContent = text; pattern.append(label); }
+        overlay.append(pattern);
+      } else {
+        const watermark = document.createElement("span");
+        watermark.className = `stamp-watermark stamp-watermark-${position}`;
+        watermark.textContent = text;
+        watermark.style.color = color;
+        watermark.style.opacity = String(opacity);
+        watermark.style.setProperty("--preview-watermark-size", `${previewSize}rem`);
+        overlay.append(watermark);
+      }
+      return;
+    }
+
+    const signaturePage = Math.max(1, Number(document.querySelector("#signature-page").value) || 1);
+    const showOnPage = document.querySelector("#signature-all").checked || signaturePage === index + 1;
+    if (signaturePreviewUrl && showOnPage) {
+      const signature = document.createElement("img");
+      signature.className = `stamp-signature stamp-${document.querySelector("#signature-position").value}`;
+      signature.src = signaturePreviewUrl;
+      signature.alt = "";
+      overlay.append(signature);
+    }
+  });
 }
 
 function applyMode() {
@@ -230,6 +292,7 @@ async function renderItems(expectedGeneration = loadGeneration) {
       try { await renderPdfCanvas(item, canvas); }
       catch { preview.append(document.createTextNode("Preview unavailable")); }
     }
+    if (mode === "stamp") { const overlay = document.createElement("div"); overlay.className = "page-stamp-overlay"; overlay.setAttribute("aria-hidden", "true"); preview.append(overlay); }
     if (expectedGeneration !== loadGeneration) return;
     li.append(preview);
     if (mode === "organize") {
@@ -238,6 +301,7 @@ async function renderItems(expectedGeneration = loadGeneration) {
     }
     elements.pageGrid.append(li);
   }
+  if (expectedGeneration === loadGeneration) updateStampPreviews();
 }
 
 async function buildImagesPdf() {
@@ -298,8 +362,9 @@ elements.pageGrid.addEventListener("dragover", (event) => event.preventDefault()
 elements.pageGrid.addEventListener("drop", (event) => { event.preventDefault(); const target = event.target.closest(".page-item"); if (!target || !draggedId || target.dataset.id === draggedId) return; const list = mode === "images" ? imageItems : pageItems; const from = list.findIndex((item) => item.id === draggedId); const to = list.findIndex((item) => item.id === target.dataset.id); if (from < 0 || to < 0) return; const [moved] = list.splice(from, 1); list.splice(to, 0, moved); syncPageGridOrder(); });
 document.querySelectorAll('input[name="extract-action"]').forEach((input) => input.addEventListener("change", syncOptionPanels));
 document.querySelectorAll('input[name="stamp-kind"]').forEach((input) => input.addEventListener("change", syncOptionPanels));
-elements.signatureInput.addEventListener("change", () => { signatureFile = elements.signatureInput.files[0] || null; elements.signatureLabel.textContent = signatureFile ? signatureFile.name : "Choose a PNG or JPG signature"; });
+elements.signatureInput.addEventListener("change", () => { revokeSignaturePreview(); signatureFile = elements.signatureInput.files[0] || null; if (signatureFile) signaturePreviewUrl = URL.createObjectURL(signatureFile); elements.signatureLabel.textContent = signatureFile ? signatureFile.name : "Choose a PNG or JPG signature"; updateStampPreviews(); });
 document.querySelector("#watermark-color").addEventListener("input", (event) => { document.querySelector("#watermark-color-value").textContent = event.target.value.toUpperCase(); });
+document.querySelectorAll("#number-start, #number-position, #watermark-text, #watermark-position, #watermark-size, #watermark-opacity, #watermark-color, #signature-page, #signature-position, #signature-all").forEach((control) => control.addEventListener("input", updateStampPreviews));
 
 syncOptionPanels();
 applyMode();

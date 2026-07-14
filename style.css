@@ -13,3 +13,22 @@
 .field .color-control input[type="color"]{width:56px;min-height:36px;height:36px;padding:2px;border:1px solid var(--line-strong);border-radius:6px;background:#080c13;cursor:pointer}
 .color-control output{color:#dfe6f3;font-size:.8rem;font-weight:850;letter-spacing:.04em}
 @media(max-width:580px){.brand-logo-lockup{width:min(100%,350px)}.privacy-note{grid-template-columns:82px minmax(0,1fr)}.privacy-mascot{width:82px}}
+
+/* Lightweight live previews for numbering, watermarks, and signatures */
+.page-stamp-overlay{position:absolute;inset:0;z-index:1;overflow:hidden;pointer-events:none;user-select:none}
+.stamp-number{position:absolute;color:#4f566b;font-size:.58rem;font-weight:800;line-height:1;text-shadow:0 1px 1px rgba(255,255,255,.8)}
+.stamp-number.stamp-bottom-center{left:50%;bottom:5%;transform:translateX(-50%)}
+.stamp-number.stamp-bottom-right{right:6%;bottom:5%}
+.stamp-number.stamp-bottom-left{left:6%;bottom:5%}
+.stamp-number.stamp-top-center{left:50%;top:5%;transform:translateX(-50%)}
+.stamp-watermark{position:absolute;left:50%;max-width:120%;overflow:hidden;font-size:var(--preview-watermark-size,.82rem);font-weight:800;line-height:1;letter-spacing:.015em;white-space:nowrap;text-overflow:clip;transform:translate(-50%,-50%) rotate(-35deg);transform-origin:center}
+.stamp-watermark-top{top:24%}
+.stamp-watermark-center{top:50%}
+.stamp-watermark-bottom{top:76%}
+.stamp-watermark-pattern{position:absolute;inset:-18%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(5,minmax(0,1fr));align-items:center;justify-items:center;gap:3%;font-size:var(--preview-watermark-size,.55rem);font-weight:800;line-height:1;transform:rotate(-28deg) scale(1.08);transform-origin:center}
+.stamp-watermark-pattern span{max-width:150%;white-space:nowrap}
+.stamp-signature{position:absolute;width:28%;max-height:24%;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(0,0,0,.14))}
+.stamp-signature.stamp-bottom-right{right:6%;bottom:6%}
+.stamp-signature.stamp-bottom-left{left:6%;bottom:6%}
+.stamp-signature.stamp-top-right{right:6%;top:6%}
+.stamp-signature.stamp-top-left{left:6%;top:6%}

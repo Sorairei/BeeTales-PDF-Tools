@@ -25,13 +25,14 @@ BeeTales PDF Tools is a free, open-source PDF toolkit that runs entirely in the 
 | Mark | Watermark styling | Choose watermark text, size, opacity, and color. |
 | Sign | Image signature | Place a PNG or JPG signature on one page or every page. |
 | Preview | Page thumbnails | Review PDF pages locally before processing. |
+| Preview | Live stamp preview | See page numbers, watermark styling, placement, patterns, and signatures directly on the thumbnails. |
 
 ## How It Works
 
 1. The user selects PDF or image files from their device.
 2. The browser reads the selected files through the local File API.
 3. PDF.js renders page previews without sending the document anywhere.
-4. The user chooses pages, order, rotation, watermark settings, or signature placement.
+4. The user chooses pages, order, rotation, watermark settings, or signature placement and sees lightweight live previews on the page thumbnails.
 5. `pdf-lib` creates or modifies the PDF in browser memory.
 6. The finished document becomes a temporary local object URL.
 7. The browser downloads the result directly to the user's device.
