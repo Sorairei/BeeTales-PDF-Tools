@@ -125,13 +125,14 @@ function updateStampPreviews() {
       const position = document.querySelector("#watermark-position").value;
       const color = document.querySelector("#watermark-color").value;
       const opacity = Number(document.querySelector("#watermark-opacity").value);
+      const previewOpacity = Math.min(.7, Math.max(.32, opacity * 2));
       const size = Number(document.querySelector("#watermark-size").value);
       const previewSize = Math.max(.58, Math.min(1.05, size / 66));
       if (position === "full") {
         const pattern = document.createElement("div");
         pattern.className = "stamp-watermark-pattern";
         pattern.style.color = color;
-        pattern.style.opacity = String(opacity);
+        pattern.style.opacity = String(previewOpacity);
         pattern.style.setProperty("--preview-watermark-size", `${Math.max(.48, previewSize * .68)}rem`);
         for (let item = 0; item < 10; item += 1) { const label = document.createElement("span"); label.textContent = text; pattern.append(label); }
         overlay.append(pattern);
@@ -140,7 +141,7 @@ function updateStampPreviews() {
         watermark.className = `stamp-watermark stamp-watermark-${position}`;
         watermark.textContent = text;
         watermark.style.color = color;
-        watermark.style.opacity = String(opacity);
+        watermark.style.opacity = String(previewOpacity);
         watermark.style.setProperty("--preview-watermark-size", `${previewSize}rem`);
         overlay.append(watermark);
       }
@@ -256,9 +257,13 @@ async function renderPdfCanvas(item, canvas) {
     await canvas.renderTask.promise.catch(() => {});
   }
   const pdfPage = await sources[item.sourceIndex].preview.getPage(item.pageIndex + 1);
-  const viewport = pdfPage.getViewport({ scale: .38, rotation: item.rotation });
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
+  const baseViewport = pdfPage.getViewport({ scale: 1, rotation: item.rotation });
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const targetPixelWidth = Math.max(320, Math.min(520, 240 * pixelRatio));
+  const scale = Math.max(.5, Math.min(1.35, targetPixelWidth / baseViewport.width));
+  const viewport = pdfPage.getViewport({ scale, rotation: item.rotation });
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
   const renderTask = pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport });
   canvas.renderTask = renderTask;
   try { await renderTask.promise; }

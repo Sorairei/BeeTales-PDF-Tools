@@ -32,3 +32,9 @@
 .stamp-signature.stamp-bottom-left{left:6%;bottom:6%}
 .stamp-signature.stamp-top-right{right:6%;top:6%}
 .stamp-signature.stamp-top-left{left:6%;top:6%}
+
+/* Keep the high-resolution PDF canvas below the lightweight preview layer. */
+.page-preview canvas{position:absolute;inset:0;z-index:0;display:block;width:100%;height:100%;object-fit:contain;image-rendering:auto;background:#fff}
+.page-stamp-overlay{z-index:3}
+.page-number{z-index:4}
+.stamp-watermark,.stamp-watermark-pattern{mix-blend-mode:multiply}
