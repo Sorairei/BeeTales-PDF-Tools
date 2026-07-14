@@ -168,7 +168,7 @@ async function processFiles() {
     } else {
       const kind = activeValue("stamp-kind"); const options = { kind };
       if (kind === "numbers") Object.assign(options, { startAt: document.querySelector("#number-start").value, position: document.querySelector("#number-position").value });
-      if (kind === "watermark") Object.assign(options, { text: document.querySelector("#watermark-text").value, fontSize: document.querySelector("#watermark-size").value, opacity: document.querySelector("#watermark-opacity").value, color: document.querySelector("#watermark-color").value });
+      if (kind === "watermark") Object.assign(options, { text: document.querySelector("#watermark-text").value, position: document.querySelector("#watermark-position").value, fontSize: document.querySelector("#watermark-size").value, opacity: document.querySelector("#watermark-opacity").value, color: document.querySelector("#watermark-color").value });
       if (kind === "signature") { if (!signatureFile) throw new Error("Choose a signature image first."); Object.assign(options, { imageBytes: new Uint8Array(await signatureFile.arrayBuffer()), imageType: signatureFile.type || (/\.png$/i.test(signatureFile.name) ? "image/png" : "image/jpeg"), page: document.querySelector("#signature-page").value, position: document.querySelector("#signature-position").value, allPages: document.querySelector("#signature-all").checked }); }
       const bytes = await stampPdf(sources[0].bytes, options); addResult(bytes, safePdfName(sources[0].file.name, kind === "numbers" ? "numbered" : kind === "watermark" ? "watermarked" : "signed"), `${pageItems.length} pages`);
     }

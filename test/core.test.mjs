@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "../vendor/pdf-lib/pdf-lib.esm.min.js";
-import { buildPdfFromPages, parseHexColor, parsePageSelection, stampPdf } from "../core.mjs";
+import { buildPdfFromPages, calculateWatermarkPlacement, parseHexColor, parsePageSelection, stampPdf } from "../core.mjs";
 
 test("page selections accept ranges, spaces, and duplicates", () => {
   assert.deepEqual(parsePageSelection("1-3, 3, 5", 5), [0, 1, 2, 4]);
@@ -12,6 +12,15 @@ test("page selections accept ranges, spaces, and duplicates", () => {
 test("watermark colors are converted from hex to PDF RGB values", () => {
   assert.deepEqual(parseHexColor("#ff8000"), { red: 1, green: 128 / 255, blue: 0 });
   assert.throws(() => parseHexColor("purple"), /valid watermark color/);
+});
+
+test("watermarks can be placed at the top, center, or bottom", () => {
+  const top = calculateWatermarkPlacement(600, 800, 220, 54, "top");
+  const center = calculateWatermarkPlacement(600, 800, 220, 54, "center");
+  const bottom = calculateWatermarkPlacement(600, 800, 220, 54, "bottom");
+  assert.ok(top.y > center.y);
+  assert.ok(center.y > bottom.y);
+  assert.equal(bottom.y, 30);
 });
 
 test("pages can be copied, reordered, and rotated", async () => {

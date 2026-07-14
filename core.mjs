@@ -39,6 +39,20 @@ export function parseHexColor(value) {
   };
 }
 
+export function calculateWatermarkPlacement(pageWidth, pageHeight, textWidth, textHeight, position = "center", angleDegrees = 35) {
+  const angle = angleDegrees * Math.PI / 180;
+  const boundingWidth = textWidth * Math.cos(angle) + textHeight * Math.sin(angle);
+  const boundingHeight = textWidth * Math.sin(angle) + textHeight * Math.cos(angle);
+  const margin = Math.min(30, pageHeight * 0.05);
+  const x = (pageWidth - boundingWidth) / 2 + textHeight * Math.sin(angle);
+  const y = position === "top"
+    ? pageHeight - boundingHeight - margin
+    : position === "bottom"
+      ? margin
+      : (pageHeight - boundingHeight) / 2;
+  return { x, y, boundingWidth, boundingHeight };
+}
+
 export async function buildPdfFromPages(sources, pageItems) {
   const output = await PDFDocument.create();
   for (const item of pageItems) {
@@ -90,17 +104,32 @@ export async function stampPdf(bytes, options) {
     const watermarkColor = parseHexColor(options.color || "#7347ad");
     pages.forEach((page) => {
       const { width, height } = page.getSize();
-      const watermarkSize = Math.min(Number(options.fontSize || 54), Math.max(22, width / 7));
+      const position = ["top", "center", "bottom", "full"].includes(options.position) ? options.position : "center";
+      const requestedSize = Number(options.fontSize || 54);
+      const unitTextWidth = font.widthOfTextAtSize(text, 1);
+      const angle = 35;
+      const angleRadians = angle * Math.PI / 180;
+      const unitBoundingWidth = unitTextWidth * Math.cos(angleRadians) + Math.sin(angleRadians);
+      const unitBoundingHeight = unitTextWidth * Math.sin(angleRadians) + Math.cos(angleRadians);
+      const watermarkSize = Math.max(16, Math.min(requestedSize, width * 0.88 / unitBoundingWidth, height * 0.42 / unitBoundingHeight));
       const textWidth = font.widthOfTextAtSize(text, watermarkSize);
-      page.drawText(text, {
-        x: (width - textWidth * 0.72) / 2,
-        y: height / 2 - watermarkSize / 2,
-        size: watermarkSize,
-        font,
-        color: rgb(watermarkColor.red, watermarkColor.green, watermarkColor.blue),
-        opacity: Number(options.opacity || 0.18),
-        rotate: degrees(35),
-      });
+      const drawOptions = { size: watermarkSize, font, color: rgb(watermarkColor.red, watermarkColor.green, watermarkColor.blue), opacity: Number(options.opacity || 0.18), rotate: degrees(angle) };
+
+      if (position === "full") {
+        const patternSize = Math.max(16, Math.min(watermarkSize * 0.62, 34));
+        const patternWidth = font.widthOfTextAtSize(text, patternSize);
+        const rowStep = Math.max(patternSize * 3.6, height / 5);
+        const columnStep = Math.max(patternWidth + 70, width * 0.58);
+        let row = 0;
+        for (let y = -patternSize; y < height + rowStep; y += rowStep) {
+          const offset = row % 2 === 0 ? -patternWidth * 0.35 : width * 0.08;
+          for (let x = offset; x < width + patternWidth; x += columnStep) page.drawText(text, { ...drawOptions, x, y, size: patternSize });
+          row += 1;
+        }
+      } else {
+        const placement = calculateWatermarkPlacement(width, height, textWidth, watermarkSize, position, angle);
+        page.drawText(text, { ...drawOptions, x: placement.x, y: placement.y });
+      }
     });
   }
 
