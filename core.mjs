@@ -57,15 +57,23 @@ export function calculateWatermarkPlacement(pageWidth, pageHeight, textWidth, te
   return { x, y, boundingWidth, boundingHeight };
 }
 
-export function fitImageWithinPage(imageWidth, imageHeight, pageWidth, pageHeight, preferredWidth = 150, margin = 30) {
+export function fitImageWithinPage(imageWidth, imageHeight, pageWidth, pageHeight, preferredWidth = 150, margin = 30, maxHeightRatio = 1) {
   if (![imageWidth, imageHeight, pageWidth, pageHeight].every((value) => Number.isFinite(value) && value > 0)) {
     throw new Error("The signature image or PDF page has invalid dimensions.");
   }
   const availableWidth = Math.max(1, pageWidth - margin * 2);
-  const availableHeight = Math.max(1, pageHeight - margin * 2);
+  const normalizedHeightRatio = Number.isFinite(Number(maxHeightRatio)) ? Math.max(0.1, Math.min(1, Number(maxHeightRatio))) : 1;
+  const availableHeight = Math.max(1, Math.min(pageHeight - margin * 2, pageHeight * normalizedHeightRatio));
   const requestedWidth = Math.max(1, Math.min(Number(preferredWidth) || 150, 260));
   const scale = Math.min(requestedWidth / imageWidth, availableWidth / imageWidth, availableHeight / imageHeight);
   return { width: imageWidth * scale, height: imageHeight * scale };
+}
+
+export function signatureWidthForPage(pageWidth, requestedScale = 0.26) {
+  if (!Number.isFinite(pageWidth) || pageWidth <= 0) throw new Error("The PDF page has an invalid width.");
+  const numericScale = Number(requestedScale);
+  const scale = Number.isFinite(numericScale) ? Math.max(0.12, Math.min(0.4, numericScale)) : 0.26;
+  return Math.min(pageWidth * scale, 260);
 }
 
 export async function buildPdfFromPages(sources, pageItems) {
@@ -157,7 +165,8 @@ export async function stampPdf(bytes, options) {
     if (!targetPages.length) throw new Error("The selected signature page does not exist.");
     targetPages.forEach((page) => {
       const { width, height } = page.getSize();
-      const fitted = fitImageWithinPage(image.width, image.height, width, height, options.signatureWidth || 150, 30);
+      const preferredWidth = options.signatureWidth || signatureWidthForPage(width, options.signatureScale);
+      const fitted = fitImageWithinPage(image.width, image.height, width, height, preferredWidth, 30, 0.34);
       const targetWidth = fitted.width;
       const targetHeight = fitted.height;
       const { x, y } = textPosition(page, targetWidth, targetHeight, options.position || "bottom-right", 30);

@@ -155,6 +155,7 @@ function updateStampPreviews() {
       signature.className = `stamp-signature stamp-${document.querySelector("#signature-position").value}`;
       signature.src = signaturePreviewUrl;
       signature.alt = "";
+      signature.style.width = `${Number(document.querySelector("#signature-size").value) * 100}%`;
       overlay.append(signature);
     }
   });
@@ -346,7 +347,7 @@ async function processFiles() {
       const kind = activeValue("stamp-kind"); const options = { kind };
       if (kind === "numbers") Object.assign(options, { startAt: document.querySelector("#number-start").value, position: document.querySelector("#number-position").value });
       if (kind === "watermark") Object.assign(options, { text: document.querySelector("#watermark-text").value, position: document.querySelector("#watermark-position").value, fontSize: document.querySelector("#watermark-size").value, opacity: document.querySelector("#watermark-opacity").value, color: document.querySelector("#watermark-color").value });
-      if (kind === "signature") { if (!signatureFile) throw new Error("Choose a signature image first."); Object.assign(options, { imageBytes: new Uint8Array(await signatureFile.arrayBuffer()), imageType: signatureFile.type || (/\.png$/i.test(signatureFile.name) ? "image/png" : "image/jpeg"), page: document.querySelector("#signature-page").value, position: document.querySelector("#signature-position").value, allPages: document.querySelector("#signature-all").checked }); }
+      if (kind === "signature") { if (!signatureFile) throw new Error("Choose a signature image first."); Object.assign(options, { imageBytes: new Uint8Array(await signatureFile.arrayBuffer()), imageType: signatureFile.type || (/\.png$/i.test(signatureFile.name) ? "image/png" : "image/jpeg"), page: document.querySelector("#signature-page").value, position: document.querySelector("#signature-position").value, signatureScale: document.querySelector("#signature-size").value, allPages: document.querySelector("#signature-all").checked }); }
       const bytes = await stampPdf(sources[0].bytes, options); addResult(bytes, safePdfName(sources[0].file.name, kind === "numbers" ? "numbered" : kind === "watermark" ? "watermarked" : "signed"), `${pageItems.length} pages`);
     }
     elements.results.classList.remove("is-hidden"); if (mode !== "extract" || activeValue("extract-action") !== "split") elements.resultsTitle.textContent = "Your PDF is ready"; setStatus("Done. Your file stayed on this device.", 100); elements.results.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -369,7 +370,7 @@ document.querySelectorAll('input[name="extract-action"]').forEach((input) => inp
 document.querySelectorAll('input[name="stamp-kind"]').forEach((input) => input.addEventListener("change", syncOptionPanels));
 elements.signatureInput.addEventListener("change", () => { revokeSignaturePreview(); signatureFile = elements.signatureInput.files[0] || null; if (signatureFile) signaturePreviewUrl = URL.createObjectURL(signatureFile); elements.signatureLabel.textContent = signatureFile ? signatureFile.name : "Choose a PNG or JPG signature"; updateStampPreviews(); });
 document.querySelector("#watermark-color").addEventListener("input", (event) => { document.querySelector("#watermark-color-value").textContent = event.target.value.toUpperCase(); });
-document.querySelectorAll("#number-start, #number-position, #watermark-text, #watermark-position, #watermark-size, #watermark-opacity, #watermark-color, #signature-page, #signature-position, #signature-all").forEach((control) => control.addEventListener("input", updateStampPreviews));
+document.querySelectorAll("#number-start, #number-position, #watermark-text, #watermark-position, #watermark-size, #watermark-opacity, #watermark-color, #signature-page, #signature-position, #signature-size, #signature-all").forEach((control) => control.addEventListener("input", updateStampPreviews));
 
 syncOptionPanels();
 applyMode();

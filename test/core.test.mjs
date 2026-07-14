@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "../vendor/pdf-lib/pdf-lib.esm.min.js";
-import { buildPdfFromPages, calculateWatermarkPlacement, createSplitPdfs, fitImageWithinPage, parseHexColor, parsePageSelection, stampPdf } from "../core.mjs";
+import { buildPdfFromPages, calculateWatermarkPlacement, createSplitPdfs, fitImageWithinPage, parseHexColor, parsePageSelection, signatureWidthForPage, stampPdf } from "../core.mjs";
 
 test("page selections accept ranges, spaces, and duplicates", () => {
   assert.deepEqual(parsePageSelection("1-3, 3, 5", 5), [0, 1, 2, 4]);
@@ -29,6 +29,13 @@ test("tall signature images are fitted inside the PDF page", () => {
   assert.ok(fitted.width <= 540);
   assert.ok(fitted.height <= 740);
   assert.equal(fitted.height, 740);
+});
+
+test("signature width stays proportional on small pages and capped on large pages", () => {
+  assert.equal(signatureWidthForPage(300, 0.26), 78);
+  assert.equal(signatureWidthForPage(2000, 0.34), 260);
+  const tall = fitImageWithinPage(100, 2000, 300, 500, 78, 30, 0.34);
+  assert.equal(tall.height, 170);
 });
 
 test("pages can be copied, reordered, and rotated", async () => {

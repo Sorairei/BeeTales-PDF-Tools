@@ -27,7 +27,7 @@
 .stamp-watermark-bottom{top:76%}
 .stamp-watermark-pattern{position:absolute;inset:-18%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(5,minmax(0,1fr));align-items:center;justify-items:center;gap:3%;font-size:var(--preview-watermark-size,.55rem);font-weight:800;line-height:1;transform:rotate(-28deg) scale(1.08);transform-origin:center}
 .stamp-watermark-pattern span{max-width:150%;white-space:nowrap}
-.stamp-signature{position:absolute;width:28%;max-height:24%;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(0,0,0,.14))}
+.stamp-signature{position:absolute;width:26%;max-height:34%;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(0,0,0,.14))}
 .stamp-signature.stamp-bottom-right{right:6%;bottom:6%}
 .stamp-signature.stamp-bottom-left{left:6%;bottom:6%}
 .stamp-signature.stamp-top-right{right:6%;top:6%}
