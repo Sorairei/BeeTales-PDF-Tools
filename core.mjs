@@ -33,6 +33,16 @@ export function safePdfName(name, suffix = "edited") {
   return `${base}-${suffix}.pdf`;
 }
 
+export function moveItem(items, fromIndex, toIndex) {
+  if (!Array.isArray(items)) throw new Error("Items must be provided as a list.");
+  const reordered = [...items];
+  if (![fromIndex, toIndex].every(Number.isInteger)) return reordered;
+  if (fromIndex < 0 || fromIndex >= reordered.length || toIndex < 0 || toIndex >= reordered.length || fromIndex === toIndex) return reordered;
+  const [moved] = reordered.splice(fromIndex, 1);
+  reordered.splice(toIndex, 0, moved);
+  return reordered;
+}
+
 export function parseHexColor(value) {
   const match = String(value || "").trim().match(/^#([0-9a-f]{6})$/i);
   if (!match) throw new Error("Choose a valid watermark color.");

@@ -11,7 +11,8 @@ BeeTales PDF Tools is a free, open-source PDF toolkit that runs entirely in the 
 | Category | Tool | Description |
 | --- | --- | --- |
 | Organize | Merge PDFs | Combine multiple PDF files into a single document. |
-| Organize | Reorder pages | Arrange pages visually with drag and drop. |
+| Organize | Reorder pages | Arrange pages visually with drag and drop or explicit move controls. |
+| Organize | Accessible reordering | Move PDF pages and source images earlier or later with keyboard-friendly controls. |
 | Organize | Rotate pages | Rotate individual pages left or right. |
 | Organize | Remove pages | Delete unwanted pages before creating the result. |
 | Split | Extract pages | Create a new PDF from ranges such as `1-3, 5, 8`. |
@@ -151,16 +152,17 @@ Preview layers are visual guides and do not alter the source document. Watermark
 
 ## Quality Verification
 
-The automated suite currently covers eight core behaviors:
+The automated suite currently covers nine core behaviors:
 
 1. Page-range parsing, duplicate removal, reversed ranges, and oversized-range rejection.
-2. Watermark color conversion.
-3. Top, center, and bottom watermark placement.
-4. Automatic fitting for tall signature images.
-5. Proportional signature sizing and maximum-width limits.
-6. Page copying, reordering, and rotation.
-7. Page-number generation.
-8. Splitting selected pages into independent PDF documents.
+2. Immutable item reordering and boundary handling.
+3. Watermark color conversion.
+4. Top, center, and bottom watermark placement.
+5. Automatic fitting for tall signature images.
+6. Proportional signature sizing and maximum-width limits.
+7. Page copying, reordering, and rotation.
+8. Page-number generation.
+9. Splitting selected pages into independent PDF documents.
 
 ## Supported Browsers
 

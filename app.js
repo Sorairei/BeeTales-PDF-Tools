@@ -1,6 +1,6 @@
 import * as pdfjsLib from "./vendor/pdfjs/pdf.mjs";
 import { PDFDocument } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
-import { buildPdfFromPages, createSplitPdfs, parsePageSelection, safePdfName, stampPdf } from "./core.mjs";
+import { buildPdfFromPages, createSplitPdfs, moveItem, parsePageSelection, safePdfName, stampPdf } from "./core.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdfjs/pdf.worker.mjs", import.meta.url).href;
 
@@ -208,7 +208,7 @@ async function loadFiles(fileList) {
     pageItems = loaded.pageItems;
     imageItems = loaded.imageItems;
     elements.pagesTitle.textContent = requestedMode === "images" ? "Arrange images" : requestedMode === "organize" ? "Arrange pages" : "Document preview";
-    elements.pagesHelp.textContent = requestedMode === "images" ? "Drag images into the order they should appear in the PDF." : requestedMode === "organize" ? "Drag pages to reorder them. Use the buttons to rotate or remove pages." : "Use this preview to identify the page numbers you need.";
+    elements.pagesHelp.textContent = requestedMode === "images" ? "Drag images or use the arrow buttons to set their PDF order." : requestedMode === "organize" ? "Drag pages or use the arrow buttons to reorder them. You can also rotate or remove pages." : "Use this preview to identify the page numbers you need.";
     elements.fileCard.classList.remove("is-hidden"); elements.pagesSection.classList.remove("is-hidden");
     elements.fileSummary.textContent = files.length === 1 ? files[0].name : `${files.length} files selected`;
     elements.fileSize.textContent = `${pageItems.length || imageItems.length} ${requestedMode === "images" ? "images" : "pages"} · ${bytesLabel(files.reduce((sum, file) => sum + file.size, 0))}`;
@@ -274,7 +274,14 @@ async function renderPdfCanvas(item, canvas) {
 function updatePageGridMetadata() {
   const items = mode === "images" ? imageItems : pageItems;
   elements.pagesCount.textContent = `${items.length} ${mode === "images" ? (items.length === 1 ? "image" : "images") : (items.length === 1 ? "page" : "pages")}`;
-  [...elements.pageGrid.children].forEach((element, index) => { element.querySelector(".page-number").textContent = String(index + 1); });
+  [...elements.pageGrid.children].forEach((element, index) => {
+    element.querySelector(".page-number").textContent = String(index + 1);
+    element.setAttribute("aria-label", `${mode === "images" ? "Image" : "Page"} ${index + 1} of ${items.length}`);
+    const earlier = element.querySelector('[data-action="earlier"]');
+    const later = element.querySelector('[data-action="later"]');
+    if (earlier) earlier.disabled = index === 0;
+    if (later) later.disabled = index === items.length - 1;
+  });
 }
 
 function syncPageGridOrder() {
@@ -282,6 +289,15 @@ function syncPageGridOrder() {
   const elementsById = new Map([...elements.pageGrid.children].map((element) => [element.dataset.id, element]));
   items.forEach((item) => elements.pageGrid.append(elementsById.get(item.id)));
   updatePageGridMetadata();
+}
+
+function moveCurrentItem(fromIndex, toIndex) {
+  const items = mode === "images" ? imageItems : pageItems;
+  const didMove = Number.isInteger(fromIndex) && Number.isInteger(toIndex) && fromIndex >= 0 && fromIndex < items.length && toIndex >= 0 && toIndex < items.length && fromIndex !== toIndex;
+  if (mode === "images") imageItems = moveItem(imageItems, fromIndex, toIndex);
+  else pageItems = moveItem(pageItems, fromIndex, toIndex);
+  syncPageGridOrder();
+  if (didMove) setStatus(`${mode === "images" ? "Image" : "Page"} moved to position ${toIndex + 1} of ${items.length}.`, 0);
 }
 
 async function renderItems(expectedGeneration = loadGeneration) {
@@ -301,13 +317,19 @@ async function renderItems(expectedGeneration = loadGeneration) {
     if (mode === "stamp") { const overlay = document.createElement("div"); overlay.className = "page-stamp-overlay"; overlay.setAttribute("aria-hidden", "true"); preview.append(overlay); }
     if (expectedGeneration !== loadGeneration) return;
     li.append(preview);
-    if (mode === "organize") {
+    if (mode === "organize" || mode === "images") {
       const actions = document.createElement("div"); actions.className = "page-actions";
-      actions.innerHTML = '<button type="button" data-action="left" title="Rotate left">↶</button><button type="button" data-action="right" title="Rotate right">↷</button><button type="button" class="remove-page" data-action="remove" title="Remove page">Remove</button>'; li.append(actions);
+      const itemLabel = mode === "images" ? "image" : "page";
+      actions.innerHTML = `<button type="button" data-action="earlier" title="Move ${itemLabel} earlier" aria-label="Move ${itemLabel} earlier">←</button><button type="button" data-action="later" title="Move ${itemLabel} later" aria-label="Move ${itemLabel} later">→</button>`;
+      if (mode === "organize") {
+        actions.classList.add("organize-actions");
+        actions.insertAdjacentHTML("beforeend", '<button type="button" data-action="left" title="Rotate page left" aria-label="Rotate page left">↶</button><button type="button" data-action="right" title="Rotate page right" aria-label="Rotate page right">↷</button><button type="button" class="remove-page" data-action="remove" title="Remove page" aria-label="Remove page">×</button>');
+      }
+      li.append(actions);
     }
     elements.pageGrid.append(li);
   }
-  if (expectedGeneration === loadGeneration) updateStampPreviews();
+  if (expectedGeneration === loadGeneration) { updatePageGridMetadata(); updateStampPreviews(); }
 }
 
 async function buildImagesPdf() {
@@ -361,11 +383,31 @@ elements.dropZone.addEventListener("dragleave", () => elements.dropZone.classLis
 elements.dropZone.addEventListener("drop", (event) => { event.preventDefault(); elements.dropZone.classList.remove("is-dragging"); loadFiles(event.dataTransfer.files); });
 elements.clear.addEventListener("click", () => resetWorkspace({ keepMode: true })); elements.reset.addEventListener("click", () => resetWorkspace({ keepMode: false }));
 elements.form.addEventListener("submit", (event) => { event.preventDefault(); processFiles().catch((error) => { showError(error); setStatus("Please review the highlighted issue.", 0); setProcessingBusy(false); }); });
-elements.pageGrid.addEventListener("click", async (event) => { const button = event.target.closest("button[data-action]"); if (!button) return; const itemElement = button.closest(".page-item"); const item = pageItems.find((entry) => entry.id === itemElement.dataset.id); if (!item) return; if (button.dataset.action === "remove") { pageItems = pageItems.filter((entry) => entry !== item); itemElement.remove(); updatePageGridMetadata(); } else { item.rotation = (item.rotation + (button.dataset.action === "right" ? 90 : 270)) % 360; const canvas = itemElement.querySelector("canvas"); try { await renderPdfCanvas(item, canvas); } catch { showError("This page preview could not be refreshed, but the rotation is still saved."); } } if (!pageItems.length) { elements.pagesSection.classList.add("is-hidden"); showError("All pages were removed. Clear the file or choose another PDF."); } });
+elements.pageGrid.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const itemElement = button.closest(".page-item");
+  const items = mode === "images" ? imageItems : pageItems;
+  const itemIndex = items.findIndex((entry) => entry.id === itemElement.dataset.id);
+  if (itemIndex < 0) return;
+  if (button.dataset.action === "earlier" || button.dataset.action === "later") {
+    moveCurrentItem(itemIndex, itemIndex + (button.dataset.action === "earlier" ? -1 : 1));
+    return;
+  }
+  const item = pageItems[itemIndex];
+  if (button.dataset.action === "remove") {
+    pageItems = pageItems.filter((entry) => entry !== item); itemElement.remove(); updatePageGridMetadata();
+  } else {
+    item.rotation = (item.rotation + (button.dataset.action === "right" ? 90 : 270)) % 360;
+    const canvas = itemElement.querySelector("canvas");
+    try { await renderPdfCanvas(item, canvas); } catch { showError("This page preview could not be refreshed, but the rotation is still saved."); }
+  }
+  if (!pageItems.length) { elements.pagesSection.classList.add("is-hidden"); showError("All pages were removed. Clear the file or choose another PDF."); }
+});
 elements.pageGrid.addEventListener("dragstart", (event) => { const item = event.target.closest(".page-item"); if (!item) return; draggedId = item.dataset.id; item.classList.add("is-dragging"); });
 elements.pageGrid.addEventListener("dragend", (event) => { event.target.closest(".page-item")?.classList.remove("is-dragging"); draggedId = null; });
 elements.pageGrid.addEventListener("dragover", (event) => event.preventDefault());
-elements.pageGrid.addEventListener("drop", (event) => { event.preventDefault(); const target = event.target.closest(".page-item"); if (!target || !draggedId || target.dataset.id === draggedId) return; const list = mode === "images" ? imageItems : pageItems; const from = list.findIndex((item) => item.id === draggedId); const to = list.findIndex((item) => item.id === target.dataset.id); if (from < 0 || to < 0) return; const [moved] = list.splice(from, 1); list.splice(to, 0, moved); syncPageGridOrder(); });
+elements.pageGrid.addEventListener("drop", (event) => { event.preventDefault(); const target = event.target.closest(".page-item"); if (!target || !draggedId || target.dataset.id === draggedId) return; const list = mode === "images" ? imageItems : pageItems; const from = list.findIndex((item) => item.id === draggedId); const to = list.findIndex((item) => item.id === target.dataset.id); if (from < 0 || to < 0) return; moveCurrentItem(from, to); });
 document.querySelectorAll('input[name="extract-action"]').forEach((input) => input.addEventListener("change", syncOptionPanels));
 document.querySelectorAll('input[name="stamp-kind"]').forEach((input) => input.addEventListener("change", syncOptionPanels));
 elements.signatureInput.addEventListener("change", () => { revokeSignaturePreview(); signatureFile = elements.signatureInput.files[0] || null; if (signatureFile) signaturePreviewUrl = URL.createObjectURL(signatureFile); elements.signatureLabel.textContent = signatureFile ? signatureFile.name : "Choose a PNG or JPG signature"; updateStampPreviews(); });

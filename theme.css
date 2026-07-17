@@ -319,10 +319,19 @@ legend,
 
 .primary-button:focus-visible,
 .quiet-button:focus-visible,
+.page-actions button:focus-visible,
 .reset-floating-button:focus-visible,
 .result-card a:focus-visible,
 .sponsor-button:focus-visible,
 .footer-repository:focus-visible {
+  outline: 3px solid rgba(145, 189, 89, 0.42);
+  outline-offset: 3px;
+}
+
+.mode-control input:focus-visible + span,
+.segmented-control input:focus-visible + span,
+.drop-zone:has(input:focus-visible),
+.signature-picker:has(input:focus-visible) {
   outline: 3px solid rgba(145, 189, 89, 0.42);
   outline-offset: 3px;
 }

@@ -1,13 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "../vendor/pdf-lib/pdf-lib.esm.min.js";
-import { buildPdfFromPages, calculateWatermarkPlacement, createSplitPdfs, fitImageWithinPage, parseHexColor, parsePageSelection, signatureWidthForPage, stampPdf } from "../core.mjs";
+import { buildPdfFromPages, calculateWatermarkPlacement, createSplitPdfs, fitImageWithinPage, moveItem, parseHexColor, parsePageSelection, signatureWidthForPage, stampPdf } from "../core.mjs";
 
 test("page selections accept ranges, spaces, and duplicates", () => {
   assert.deepEqual(parsePageSelection("1-3, 3, 5", 5), [0, 1, 2, 4]);
   assert.throws(() => parsePageSelection("6", 5), /outside/);
   assert.throws(() => parsePageSelection("4-2", 5), /backwards/);
   assert.throws(() => parsePageSelection("1-999999999", 5), /outside/);
+});
+
+test("items can be moved earlier or later without mutating the source list", () => {
+  const source = ["first", "second", "third"];
+  assert.deepEqual(moveItem(source, 2, 0), ["third", "first", "second"]);
+  assert.deepEqual(moveItem(source, 0, 1), ["second", "first", "third"]);
+  assert.deepEqual(moveItem(source, 0, -1), source);
+  assert.deepEqual(source, ["first", "second", "third"]);
 });
 
 test("watermark colors are converted from hex to PDF RGB values", () => {
