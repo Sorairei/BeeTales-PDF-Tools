@@ -245,10 +245,12 @@ function getRenderContainer(cssWidth) {
   if (!el) {
     el = document.createElement("div");
     el.id = "ofc-render";
-    el.style.cssText = `position:fixed;top:0;left:-9999px;overflow:visible;background:#fff;z-index:-1;box-sizing:border-box`;
+    el.style.cssText = `position:fixed;top:0;left:-9999px;overflow:hidden;background:#fff;z-index:-1;box-sizing:border-box`;
     document.body.append(el);
   }
   el.style.width = cssPx(cssWidth);
+  el.style.height = "";
+  el.style.overflow = "";
   el.innerHTML = "";
   return el;
 }
@@ -569,8 +571,8 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
 
     const mediaUrls = await loadMediaUrls(zip);
 
-    const slideWEmu = size ? size.width * 12700 : 12192000;
-    const slideHEmu = size ? size.height * 12700 : 6858000;
+    const slideWEmu = Math.round(pw * 12700);
+    const slideHEmu = Math.round(ph * 12700);
     const cssW = Math.round(ptToCss(pw));
     const cssH = Math.round(ptToCss(ph));
 
