@@ -439,6 +439,31 @@ async function loadMediaUrls(zip) {
   return map;
 }
 
+function stripHiddenFlags(cSld) {
+  const spTree = child(cSld, "spTree");
+  if (!spTree) return;
+  const elements = [];
+  for (const el of spTree.children) {
+    const ln = el.localName;
+    if (ln !== "sp" && ln !== "pic") continue;
+    const nvPr = child(el, ln === "pic" ? "nvPicPr" : "nvSpPr");
+    const cNvPr = nvPr && child(nvPr, "cNvPr");
+    if (cNvPr && cNvPr.getAttribute("hidden") === "1") cNvPr.removeAttribute("hidden");
+    elements.push(cNvPr);
+  }
+  const timing = child(cSld.parentElement, "timing");
+  if (!timing) return;
+  const tgts = timing.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "spTgt") || timing.getElementsByTagName("spTgt");
+  const animated = new Set();
+  for (const t of tgts) {
+    const id = t.getAttribute("spid");
+    if (id) animated.add(id);
+  }
+  for (const cNvPr of elements) {
+    if (cNvPr && animated.has(cNvPr.getAttribute("id"))) cNvPr.removeAttribute("hidden");
+  }
+}
+
 function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, mediaUrls) {
   const stack = [];
   stack.push(`<div style="position:relative;overflow:hidden;width:${containerW}px;height:${containerH}px;background:#fff;font-family:Calibri,Segoe UI,Roboto,sans-serif;color:#000;box-sizing:border-box">`);
@@ -521,10 +546,10 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
 
     const mediaUrls = await loadMediaUrls(zip);
 
-    const slideW = size ? size.width * 12700 : 12192000;
-    const slideH = size ? size.height * 12700 : 6858000;
-    const containerW = 960;
-    const containerH = Math.round(containerW * slideH / slideW) || 540;
+    const slideWEmu = size ? size.width * 12700 : 12192000;
+    const slideHEmu = size ? size.height * 12700 : 6858000;
+    const cssW = Math.round(ptToCss(pw));
+    const cssH = Math.round(ptToCss(ph));
 
     for (const slidePath of slideFiles) {
       try {
@@ -546,7 +571,9 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
         const cSld = doc.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0] || child(doc.documentElement, "cSld") || doc.querySelector("cSld");
         if (!cSld) continue;
 
-        const slideHtml = buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, mediaUrls);
+        stripHiddenFlags(cSld);
+
+        const slideHtml = buildSlideHtml(cSld, slideWEmu, slideHEmu, cssW, cssH, relsMap, mediaUrls);
         await captureHtml(pdfDoc, slideHtml, pw, ph);
       } catch (err) {
         console.warn("Skipped slide:", slidePath, err.message);
