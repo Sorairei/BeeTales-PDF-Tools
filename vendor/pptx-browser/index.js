@@ -234,6 +234,25 @@ export default class PptxRenderer {
       await renderSpTree(ctx, spTree, slideRels, allImages,
         this.themeColors, this.themeData, scale, placeholderMap, this._files);
     }
+    if (typeof window !== 'undefined' && window.__PPTX_DEBUG) {
+      console.log(`[PPTX_DEBUG] Slide ${slideIndex}:`);
+      console.log('  cSld:', !!cSld, 'spTree:', !!spTree, 'children:', spTree?.children?.length);
+      if (spTree) {
+        for (const ch of spTree.children) {
+          const nvSpPr = g1(ch, 'nvSpPr');
+          const nvPr = nvSpPr ? g1(nvSpPr, 'nvPr') : null;
+          const ph = nvPr ? g1(nvPr, 'ph') : null;
+          const spPr = g1(ch, 'spPr');
+          const xfrm = spPr ? g1(spPr, 'xfrm') : null;
+          const txBody = g1(ch, 'txBody');
+          console.log(`  <${ch.localName}> ph:${!!ph} xfrm:${!!xfrm} txBody:${!!txBody} ` +
+            (xfrm ? `off=(${g1(xfrm,'off')?.getAttribute('x')},${g1(xfrm,'off')?.getAttribute('y')}) ext=(${g1(xfrm,'ext')?.getAttribute('cx')},${g1(xfrm,'ext')?.getAttribute('cy')})` : ''));
+        }
+      }
+      console.log('  placeholderMap entries:', Object.keys(placeholderMap).length, Object.keys(placeholderMap));
+      console.log('  slideSize: cx=', this.slideSize.cx, 'cy=', this.slideSize.cy);
+      console.log('  canvas:', canvas.width, 'x', canvas.height, 'scale:', width / this.slideSize.cx);
+    }
   }
 
   /**

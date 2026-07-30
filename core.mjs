@@ -341,6 +341,74 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
     595.28, 841.89);
 }
 
+/** Sample multiple rows of canvas to detect content */
+function isCanvasBlankDeep(canvas) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  const sampleRows = [0, Math.floor(h / 4), Math.floor(h / 2), Math.floor(3 * h / 4), h - 1];
+  for (const row of sampleRows) {
+    if (row < 0 || row >= h) continue;
+    const data = ctx.getImageData(0, row, Math.min(w, 32), 1).data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 250 || data[i + 1] < 250 || data[i + 2] < 250) return false;
+    }
+  }
+  return true;
+}
+
+/** Extract slide text directly from PPTX XML for fallback rendering */
+function extractSlideTextSimple(renderer, slideIndex) {
+  try {
+    const slidePath = renderer.slidePaths[slideIndex];
+    if (!slidePath) return null;
+    const xml = renderer._readText(slidePath);
+    if (!xml) return null;
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    const texts = [];
+    for (const t of doc.querySelectorAll("t")) {
+      if (t.textContent) texts.push(t.textContent.trim());
+    }
+    return texts.length ? texts.join("\n") : null;
+  } catch { return null; }
+}
+
+/** Render text content onto a canvas as a simple fallback */
+function renderFallbackSlide(canvas, text, pw, ph) {
+  const scale = 2;
+  const w = Math.round(pw * PT2CSS * scale);
+  const h = Math.round(ph * PT2CSS * scale);
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#222222";
+  ctx.textBaseline = "top";
+  const margin = Math.round(40 * scale);
+  const maxW = w - margin * 2;
+  ctx.font = `${Math.round(14 * scale)}px sans-serif`;
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  let y = margin;
+  for (const line of lines) {
+    if (y > h - margin) break;
+    if (ctx.measureText(line).width <= maxW) {
+      ctx.fillText(line, margin, y);
+      y += Math.round(20 * scale);
+    } else {
+      const words = line.split(" ");
+      let x = margin;
+      for (const word of words) {
+        const wordW = ctx.measureText(word + " ").width;
+        if (x + wordW > margin + maxW) { x = margin; y += Math.round(20 * scale); }
+        ctx.fillText(word, x, y);
+        x += wordW;
+      }
+      y += Math.round(20 * scale);
+    }
+    if (y > h - margin) break;
+  }
+}
+
 export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
   resetRenderContainer();
   const { PptxRenderer } = await import("./vendor/pptx-browser/index.js");
@@ -357,13 +425,55 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
         const canvas = document.createElement("canvas");
         const rw = Math.round(cssW * CAPTURE_SCALE);
         await renderer.renderSlide(i, canvas, rw);
-        await waitForCanvasContent(canvas);
-        const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
-        const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
-        const page = pdfDoc.addPage([pw, ph]);
-        page.drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+
+        // Debug: show canvas as visible image on page
+        if (window.__PPTX_DEBUG) {
+          const debugImg = document.createElement("img");
+          debugImg.src = canvas.toDataURL("image/jpeg", 0.85);
+          debugImg.style.cssText = "position:fixed;bottom:10px;right:10px;z-index:99999;max-width:300px;max-height:200px;border:3px solid red;background:#fff;box-shadow:0 0 20px rgba(0,0,0,0.5);";
+          debugImg.title = `Slide ${i + 1} (click to close)`;
+          debugImg.onclick = () => debugImg.remove();
+          document.body.append(debugImg);
+        }
+
+        if (!isCanvasBlankDeep(canvas)) {
+          const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
+          const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+          const page = pdfDoc.addPage([pw, ph]);
+          page.drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+        } else {
+          console.warn("Slide", i + 1, "blank after pptx-browser — trying text fallback");
+          const text = extractSlideTextSimple(renderer, i);
+          if (text) {
+            const fbCanvas = document.createElement("canvas");
+            renderFallbackSlide(fbCanvas, text, pw, ph);
+            const blob = await new Promise((r) => fbCanvas.toBlob(r, "image/jpeg", 0.92));
+            const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+            const page = pdfDoc.addPage([pw, ph]);
+            page.drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+          } else {
+            const page = pdfDoc.addPage([pw, ph]);
+            const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+            page.drawText(`[Slide ${i + 1}]`, { x: 50, y: ph - 50, size: 18, font, color: rgb(0.5, 0.5, 0.5) });
+          }
+        }
       } catch (err) {
         console.warn("Skipped blank/failed slide", i + 1, err.message);
+        try {
+          const text = extractSlideTextSimple(renderer, i);
+          if (text) {
+            const fbCanvas = document.createElement("canvas");
+            renderFallbackSlide(fbCanvas, text, pw, ph);
+            const blob = await new Promise((r) => fbCanvas.toBlob(r, "image/jpeg", 0.92));
+            const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+            const page = pdfDoc.addPage([pw, ph]);
+            page.drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+          } else {
+            const page = pdfDoc.addPage([pw, ph]);
+            const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+            page.drawText(`[Slide ${i + 1}]`, { x: 50, y: ph - 50, size: 18, font, color: rgb(0.5, 0.5, 0.5) });
+          }
+        } catch {}
       }
     }
   } finally {
