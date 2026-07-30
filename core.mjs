@@ -456,6 +456,7 @@ function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, m
   }
 
   function posDiv(el, gx, gy) {
+    if (!el) return;
     const ln = el.localName;
     if (ln === "sp") {
       const spPr = child(el, "spPr");
@@ -506,50 +507,53 @@ function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, m
 }
 
 export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
-  const JSZipLib = globalThis.JSZip;
-  if (!JSZipLib) throw new Error("JSZip library is not available.");
-  const size = await detectPptxPageSize(arrayBuffer);
-  const pw = size ? size.width : 595.28;
-  const ph = size ? size.height : 841.89;
-  const zip = await JSZipLib.loadAsync(arrayBuffer);
-  const slideFiles = Object.keys(zip.files)
-    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
-    .sort();
-  if (!slideFiles.length) throw new Error("The presentation contains no slides.");
+  try {
+    const JSZipLib = globalThis.JSZip;
+    if (!JSZipLib) throw new Error("JSZip library is not available.");
+    const size = await detectPptxPageSize(arrayBuffer);
+    const pw = size ? size.width : 595.28;
+    const ph = size ? size.height : 841.89;
+    const zip = await JSZipLib.loadAsync(arrayBuffer);
+    const slideFiles = Object.keys(zip.files)
+      .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+      .sort();
+    if (!slideFiles.length) throw new Error("No slides found in this presentation.");
 
-  const mediaUrls = await loadMediaUrls(zip);
+    const mediaUrls = await loadMediaUrls(zip);
 
-  const slideW = size ? size.width * 12700 : 12192000;
-  const slideH = size ? size.height * 12700 : 6858000;
-  const containerW = 960;
-  const containerH = Math.round(containerW * slideH / slideW);
+    const slideW = size ? size.width * 12700 : 12192000;
+    const slideH = size ? size.height * 12700 : 6858000;
+    const containerW = 960;
+    const containerH = Math.round(containerW * slideH / slideW) || 540;
 
-  for (const slidePath of slideFiles) {
-    const slideNum = slidePath.match(/slide(\d+)\.xml$/)[1];
-    const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
-    const relsDoc = zip.files[relsPath] ? new DOMParser().parseFromString(await zip.files[relsPath].async("text"), "text/xml") : null;
-    const relsMap = {};
-    if (relsDoc) {
-      for (const tagName of ["Relationship", "p:Relationship"]) {
-        const els = relsDoc.getElementsByTagName(tagName);
-        if (els && els.length) {
-          for (const rel of els) {
+    for (const slidePath of slideFiles) {
+      try {
+        const slideNum = slidePath.match(/slide(\d+)\.xml$/)[1];
+        const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
+        const relsDoc = zip.files[relsPath] ? new DOMParser().parseFromString(await zip.files[relsPath].async("text"), "text/xml") : null;
+        const relsMap = {};
+        if (relsDoc) {
+          const relEls = relsDoc.getElementsByTagName("Relationship");
+          for (const rel of relEls) {
             const id = rel.getAttribute("Id");
             const target = rel.getAttribute("Target");
             if (id && target) relsMap[id] = target.startsWith("../") ? target.replace("../", "ppt/") : "ppt/" + target;
           }
-          break;
         }
+
+        const xml = await zip.files[slidePath].async("text");
+        const doc = new DOMParser().parseFromString(xml, "text/xml");
+        const cSld = doc.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0] || child(doc.documentElement, "cSld") || doc.querySelector("cSld");
+        if (!cSld) continue;
+
+        const slideHtml = buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, mediaUrls);
+        await captureHtml(pdfDoc, slideHtml, pw, ph);
+      } catch (err) {
+        console.warn("Skipped slide:", slidePath, err.message);
       }
     }
-
-    const xml = await zip.files[slidePath].async("text");
-    const doc = new DOMParser().parseFromString(xml, "text/xml");
-    const cSld = doc.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0] || child(doc.documentElement, "cSld") || doc.querySelector("cSld");
-    if (!cSld) continue;
-
-    const slideHtml = buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, mediaUrls);
-    await captureHtml(pdfDoc, slideHtml, pw, ph);
+  } catch (err) {
+    throw new Error(`PPTX conversion error: ${err.message}`);
   }
 }
 
