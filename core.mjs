@@ -189,23 +189,58 @@ export async function stampPdf(bytes, options) {
   return document.save();
 }
 
-const A4_PT_W = 595.28;
-const A4_PT_H = 841.89;
 const CAPTURE_SCALE = 2;
-const A4_CSS_W = 210 / 25.4 * 96;
-const A4_CSS_H = 297 / 25.4 * 96;
-const CSS2PT = A4_PT_W / A4_CSS_W;
+const PT2CSS = 96 / 72;
 
 function cssPx(value) { return `${value}px`; }
 
-function getRenderContainer() {
+function ptToCss(pt) { return pt * PT2CSS; }
+
+async function detectDocxPageSize(arrayBuffer) {
+  try {
+    const JSZipLib = globalThis.JSZip;
+    if (!JSZipLib) return null;
+    const zip = await JSZipLib.loadAsync(arrayBuffer);
+    const file = zip.files["word/document.xml"];
+    if (!file) return null;
+    const xml = await file.async("text");
+    const m = xml.match(/<w:pgSz[^>]*w:w="(\d+)"[^>]*w:h="(\d+)"|<w:pgSz[^>]*w:h="(\d+)"[^>]*w:w="(\d+)"/);
+    if (m) {
+      const w = Number(m[1] || m[4]) / 20;
+      const h = Number(m[2] || m[3]) / 20;
+      if (w > 0 && h > 0) return { width: w, height: h };
+    }
+  } catch {}
+  return null;
+}
+
+async function detectPptxPageSize(arrayBuffer) {
+  try {
+    const JSZipLib = globalThis.JSZip;
+    if (!JSZipLib) return null;
+    const zip = await JSZipLib.loadAsync(arrayBuffer);
+    const file = zip.files["ppt/presentation.xml"];
+    if (!file) return null;
+    const xml = await file.async("text");
+    const m = xml.match(/<p:slideSize[^>]*cx="(\d+)"[^>]*cy="(\d+)"|<p:slideSize[^>]*cy="(\d+)"[^>]*cx="(\d+)"/);
+    if (m) {
+      const w = Number(m[1] || m[4]) / 12700;
+      const h = Number(m[2] || m[3]) / 12700;
+      if (w > 0 && h > 0) return { width: w, height: h };
+    }
+  } catch {}
+  return null;
+}
+
+function getRenderContainer(cssWidth) {
   let el = document.getElementById("ofc-render");
   if (!el) {
     el = document.createElement("div");
     el.id = "ofc-render";
-    el.style.cssText = `position:fixed;top:0;left:-9999px;width:${cssPx(A4_CSS_W)};overflow:visible;background:#fff;z-index:-1;box-sizing:border-box`;
+    el.style.cssText = `position:fixed;top:0;left:-9999px;overflow:visible;background:#fff;z-index:-1;box-sizing:border-box`;
     document.body.append(el);
   }
+  el.style.width = cssPx(cssWidth);
   el.innerHTML = "";
   return el;
 }
@@ -216,8 +251,10 @@ async function settle() {
   await new Promise((r) => setTimeout(r, 50));
 }
 
-async function captureHtml(pdfDoc, html) {
-  const el = getRenderContainer();
+async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt) {
+  const cssW = ptToCss(pageWidthPt);
+  const cssH = ptToCss(pageHeightPt);
+  const el = getRenderContainer(cssW);
   el.innerHTML = html;
   await settle();
 
@@ -228,8 +265,8 @@ async function captureHtml(pdfDoc, html) {
     logging: false,
   });
 
-  const pageH = Math.round(A4_CSS_H * CAPTURE_SCALE);
-  const pageW = Math.round(A4_CSS_W * CAPTURE_SCALE);
+  const pageH = Math.round(cssH * CAPTURE_SCALE);
+  const pageW = Math.round(cssW * CAPTURE_SCALE);
   const totalH = full.height;
   const count = Math.ceil(totalH / pageH);
 
@@ -245,10 +282,10 @@ async function captureHtml(pdfDoc, html) {
     const blob = await new Promise((r) => chunk.toBlob(r, "image/jpeg", 0.92));
     const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
 
-    const pdfPage = pdfDoc.addPage([A4_PT_W, A4_PT_H]);
+    const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
     const drawCSS = srcH / CAPTURE_SCALE;
-    const drawPT = drawCSS * CSS2PT;
-    pdfPage.drawImage(img, { x: 0, y: A4_PT_H - drawPT, width: A4_PT_W, height: drawPT });
+    const drawPt = drawCSS / PT2CSS;
+    pdfPage.drawImage(img, { x: 0, y: pageHeightPt - drawPt, width: pageWidthPt, height: drawPt });
   }
 
   el.innerHTML = "";
@@ -257,10 +294,15 @@ async function captureHtml(pdfDoc, html) {
 export async function convertDocxToPdfPages(arrayBuffer, pdfDoc) {
   const mammothLib = globalThis.mammoth;
   if (!mammothLib) throw new Error("mammoth library is not available.");
+  const size = await detectDocxPageSize(arrayBuffer);
+  const pw = size ? size.width : 595.28;
+  const ph = size ? size.height : 841.89;
   const result = await mammothLib.convertToHtml({ arrayBuffer });
   const html = (result.value || "").trim();
   if (!html) throw new Error("The document appears to be empty or contains no extractable text.");
-  await captureHtml(pdfDoc, `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:12pt;line-height:1.35;color:#000;padding:72px">${html}</div>`);
+  await captureHtml(pdfDoc,
+    `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:12pt;line-height:1.35;color:#000;padding:72px">${html}</div>`,
+    pw, ph);
 }
 
 export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
@@ -271,12 +313,17 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
   const sheet = workbook.Sheets[sheetName];
   const html = XLSX.utils.sheet_to_html(sheet, { editable: false });
   if (!html) throw new Error("The spreadsheet contains no data.");
-  await captureHtml(pdfDoc, `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:10pt;color:#000;padding:54px">${html}</div>`);
+  await captureHtml(pdfDoc,
+    `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:10pt;color:#000;padding:54px">${html}</div>`,
+    595.28, 841.89);
 }
 
 export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
   const JSZipLib = globalThis.JSZip;
   if (!JSZipLib) throw new Error("JSZip library is not available.");
+  const size = await detectPptxPageSize(arrayBuffer);
+  const pw = size ? size.width : 595.28;
+  const ph = size ? size.height : 841.89;
   const zip = await JSZipLib.loadAsync(arrayBuffer);
   const slideFiles = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
@@ -295,7 +342,9 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
     const slideHtml = texts
       .map((t) => `<p style="margin:0 0 8px 0;font-size:${t === texts[0] ? "20pt" : "14pt"};font-weight:${t === texts[0] ? "700" : "400"}">${t}</p>`)
       .join("");
-    await captureHtml(pdfDoc, `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;color:#000;padding:72px">${slideHtml}</div>`);
+    await captureHtml(pdfDoc,
+      `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;color:#000;padding:72px">${slideHtml}</div>`,
+      pw, ph);
   }
 }
 
