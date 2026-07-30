@@ -9,8 +9,10 @@
     <link rel="icon" href="favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="favicon.png" />
     <link rel="apple-touch-icon" href="favicon.png" />
-    <link rel="stylesheet" href="style.css?v=20260717-accessible-order" />
-    <link rel="stylesheet" href="theme.css?v=20260717-accessible-order" />
+    <link rel="stylesheet" href="style.css?v=20260717-office-convert" />
+    <link rel="stylesheet" href="theme.css?v=20260717-office-convert" />
+    <script src="vendor/mammoth/mammoth.browser.min.js"></script>
+    <script src="vendor/jszip/jszip.min.js"></script>
   </head>
   <body>
     <main class="app-shell">
@@ -51,7 +53,7 @@
             <div class="mode-control">
               <label><input type="radio" name="mode" value="organize" checked /><span><b class="mode-icon">⇄</b><strong>Organize & merge</strong><small>Reorder, rotate, remove, or join pages</small></span></label>
               <label><input type="radio" name="mode" value="extract" /><span><b class="mode-icon">✂</b><strong>Split & extract</strong><small>Keep, remove, or split selected pages</small></span></label>
-              <label><input type="radio" name="mode" value="images" /><span><b class="mode-icon">▧</b><strong>Images to PDF</strong><small>Turn JPG or PNG files into one PDF</small></span></label>
+              <label><input type="radio" name="mode" value="images" /><span><b class="mode-icon">▧</b><strong>Files to PDF</strong><small>Turn images and Office documents into one PDF</small></span></label>
               <label><input type="radio" name="mode" value="stamp" /><span><b class="mode-icon">✎</b><strong>Number, mark & sign</strong><small>Add page numbers, a watermark, or signature</small></span></label>
             </div>
           </fieldset>
@@ -108,6 +110,6 @@
       <footer class="site-footer"><p>&copy; 2026 <a href="https://github.com/Sorairei" target="_blank" rel="noopener noreferrer">Sorairei</a>. Open-source software under the <a href="LICENSE">MIT License</a>.</p><a class="footer-repository" href="https://github.com/Sorairei/BeeTales-PDF-Tools" target="_blank" rel="noopener noreferrer">View source on GitHub</a></footer>
     </main>
     <button class="reset-floating-button" id="reset-button" type="button" aria-label="Reset the tool"><span aria-hidden="true">↻</span> Reset</button>
-    <script type="module" src="app.js?v=20260717-accessible-order"></script>
+    <script type="module" src="app.js?v=20260717-office-convert"></script>
   </body>
 </html>

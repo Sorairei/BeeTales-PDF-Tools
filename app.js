@@ -1,6 +1,6 @@
 import * as pdfjsLib from "./vendor/pdfjs/pdf.mjs";
 import { PDFDocument } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
-import { buildPdfFromPages, createSplitPdfs, moveItem, parsePageSelection, safePdfName, stampPdf } from "./core.mjs";
+import { buildMixedPdf, buildPdfFromPages, createSplitPdfs, moveItem, parsePageSelection, safePdfName, stampPdf } from "./core.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdfjs/pdf.worker.mjs", import.meta.url).href;
 
@@ -20,7 +20,7 @@ const elements = {
 const modeConfig = {
   organize: { accept: "application/pdf,.pdf", multiple: true, title: "Select one or more PDF files", hint: "Drag files here to merge them, then arrange their pages", button: "Create organized PDF", idle: "Choose a PDF to get started." },
   extract: { accept: "application/pdf,.pdf", multiple: false, title: "Select one PDF file", hint: "Then choose the pages you want to extract, remove, or split", button: "Process selected pages", idle: "Choose a PDF to select its pages." },
-  images: { accept: "image/png,image/jpeg,.png,.jpg,.jpeg", multiple: true, title: "Select JPG or PNG images", hint: "Drag images here, then arrange them into one PDF", button: "Create PDF from images", idle: "Choose one or more images to get started." },
+  images: { accept: "image/png,image/jpeg,.png,.jpg,.jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx", multiple: true, title: "Select images or Office documents", hint: "Drag files here, then arrange them into one PDF", button: "Create PDF from files", idle: "Choose images or Office documents to get started." },
   stamp: { accept: "application/pdf,.pdf", multiple: false, title: "Select one PDF file", hint: "Add page numbers, a watermark, or your signature", button: "Apply to PDF", idle: "Choose a PDF to add something to it." },
 };
 
@@ -62,7 +62,7 @@ function revokeSignaturePreview() {
 
 async function disposeLoaded(sourceList = [], images = []) {
   await Promise.allSettled(sourceList.map((source) => source.preview?.destroy?.()));
-  images.forEach((item) => URL.revokeObjectURL(item.url));
+  images.forEach((item) => { if (item.url) URL.revokeObjectURL(item.url); });
 }
 
 async function cancelActiveLoads() {
@@ -168,12 +168,15 @@ function applyMode() {
   setStatus(config.idle, 0); clearError();
 }
 
+const OFFICE_TYPES = ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.presentationml.presentation"];
+const OFFICE_EXTS = /\.(docx|xlsx|pptx)$/i;
+
 function validFiles(files) {
   const list = [...files];
   if (!list.length) return [];
   if (mode === "images") {
-    const valid = list.filter((file) => ["image/png", "image/jpeg"].includes(file.type) || /\.(png|jpe?g)$/i.test(file.name));
-    if (valid.length !== list.length) throw new Error("Please choose only JPG or PNG images.");
+    const valid = list.filter((file) => ["image/png", "image/jpeg"].includes(file.type) || /\.(png|jpe?g)$/i.test(file.name) || OFFICE_TYPES.includes(file.type) || OFFICE_EXTS.test(file.name));
+    if (valid.length !== list.length) throw new Error("Please choose only images (PNG, JPG) or Office documents (DOCX, XLSX, PPTX).");
     return valid;
   }
   const valid = list.filter((file) => file.type === "application/pdf" || /\.pdf$/i.test(file.name));
@@ -207,11 +210,11 @@ async function loadFiles(fileList) {
     sources = loaded.sources;
     pageItems = loaded.pageItems;
     imageItems = loaded.imageItems;
-    elements.pagesTitle.textContent = requestedMode === "images" ? "Arrange images" : requestedMode === "organize" ? "Arrange pages" : "Document preview";
-    elements.pagesHelp.textContent = requestedMode === "images" ? "Drag images or use the arrow buttons to set their PDF order." : requestedMode === "organize" ? "Drag pages or use the arrow buttons to reorder them. You can also rotate or remove pages." : "Use this preview to identify the page numbers you need.";
+    elements.pagesTitle.textContent = requestedMode === "images" ? "Arrange files" : requestedMode === "organize" ? "Arrange pages" : "Document preview";
+    elements.pagesHelp.textContent = requestedMode === "images" ? "Drag files or use the arrow buttons to set their PDF order." : requestedMode === "organize" ? "Drag pages or use the arrow buttons to reorder them. You can also rotate or remove pages." : "Use this preview to identify the page numbers you need.";
     elements.fileCard.classList.remove("is-hidden"); elements.pagesSection.classList.remove("is-hidden");
     elements.fileSummary.textContent = files.length === 1 ? files[0].name : `${files.length} files selected`;
-    elements.fileSize.textContent = `${pageItems.length || imageItems.length} ${requestedMode === "images" ? "images" : "pages"} · ${bytesLabel(files.reduce((sum, file) => sum + file.size, 0))}`;
+    elements.fileSize.textContent = `${pageItems.length || imageItems.length} ${requestedMode === "images" ? "files" : "pages"} · ${bytesLabel(files.reduce((sum, file) => sum + file.size, 0))}`;
     await renderItems(requestId);
     if (requestId !== loadGeneration) return;
     setStatus("Ready. Review your pages, then create the result.", 0);
@@ -249,7 +252,11 @@ async function loadPdfs(files) {
 }
 
 function loadImages(files) {
-  return { sources: [], pageItems: [], imageItems: files.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) })) };
+  return { sources: [], pageItems: [], imageItems: files.map((file) => {
+    const ext = file.name.split(".").pop().toLowerCase();
+    const isImage = ["png", "jpg", "jpeg"].includes(ext);
+    return { id: crypto.randomUUID(), file, url: isImage ? URL.createObjectURL(file) : null };
+  }) };
 }
 
 async function renderPdfCanvas(item, canvas) {
@@ -273,10 +280,10 @@ async function renderPdfCanvas(item, canvas) {
 
 function updatePageGridMetadata() {
   const items = mode === "images" ? imageItems : pageItems;
-  elements.pagesCount.textContent = `${items.length} ${mode === "images" ? (items.length === 1 ? "image" : "images") : (items.length === 1 ? "page" : "pages")}`;
+  elements.pagesCount.textContent = `${items.length} ${mode === "images" ? (items.length === 1 ? "file" : "files") : (items.length === 1 ? "page" : "pages")}`;
   [...elements.pageGrid.children].forEach((element, index) => {
     element.querySelector(".page-number").textContent = String(index + 1);
-    element.setAttribute("aria-label", `${mode === "images" ? "Image" : "Page"} ${index + 1} of ${items.length}`);
+    element.setAttribute("aria-label", `${mode === "images" ? "File" : "Page"} ${index + 1} of ${items.length}`);
     const earlier = element.querySelector('[data-action="earlier"]');
     const later = element.querySelector('[data-action="later"]');
     if (earlier) earlier.disabled = index === 0;
@@ -297,7 +304,7 @@ function moveCurrentItem(fromIndex, toIndex) {
   if (mode === "images") imageItems = moveItem(imageItems, fromIndex, toIndex);
   else pageItems = moveItem(pageItems, fromIndex, toIndex);
   syncPageGridOrder();
-  if (didMove) setStatus(`${mode === "images" ? "Image" : "Page"} moved to position ${toIndex + 1} of ${items.length}.`, 0);
+  if (didMove) setStatus(`${mode === "images" ? "File" : "Page"} moved to position ${toIndex + 1} of ${items.length}.`, 0);
 }
 
 async function renderItems(expectedGeneration = loadGeneration) {
@@ -308,7 +315,17 @@ async function renderItems(expectedGeneration = loadGeneration) {
     const item = items[index]; const li = document.createElement("li"); li.className = "page-item"; li.dataset.id = item.id; li.draggable = mode === "organize" || mode === "images";
     const preview = document.createElement("div"); preview.className = "page-preview";
     const badge = document.createElement("span"); badge.className = "page-number"; badge.textContent = String(index + 1); preview.append(badge);
-    if (mode === "images") { const image = document.createElement("img"); image.className = "image-preview"; image.src = item.url; image.alt = item.file.name; preview.append(image); }
+    if (mode === "images") {
+      const ext = item.file.name.split(".").pop().toLowerCase();
+      if (["png", "jpg", "jpeg"].includes(ext)) {
+        const image = document.createElement("img"); image.className = "image-preview"; image.src = item.url; image.alt = item.file.name; preview.append(image);
+      } else {
+        const badge = document.createElement("div"); badge.className = `office-badge office-badge-${ext}`;
+        const icon = document.createElement("span"); icon.className = "office-icon"; icon.textContent = ext === "docx" ? "W" : ext === "xlsx" ? "X" : "P";
+        const name = document.createElement("span"); name.className = "office-name"; name.textContent = item.file.name;
+        badge.append(icon, name); preview.append(badge);
+      }
+    }
     else {
       const canvas = document.createElement("canvas"); preview.append(canvas);
       try { await renderPdfCanvas(item, canvas); }
@@ -319,7 +336,7 @@ async function renderItems(expectedGeneration = loadGeneration) {
     li.append(preview);
     if (mode === "organize" || mode === "images") {
       const actions = document.createElement("div"); actions.className = "page-actions";
-      const itemLabel = mode === "images" ? "image" : "page";
+      const itemLabel = mode === "images" ? "file" : "page";
       actions.innerHTML = `<button type="button" data-action="earlier" title="Move ${itemLabel} earlier" aria-label="Move ${itemLabel} earlier">←</button><button type="button" data-action="later" title="Move ${itemLabel} later" aria-label="Move ${itemLabel} later">→</button>`;
       if (mode === "organize") {
         actions.classList.add("organize-actions");
@@ -332,19 +349,6 @@ async function renderItems(expectedGeneration = loadGeneration) {
   if (expectedGeneration === loadGeneration) { updatePageGridMetadata(); updateStampPreviews(); }
 }
 
-async function buildImagesPdf() {
-  const output = await PDFDocument.create(); const preset = elements.pageSize.value; const margin = Number(elements.imageMargin.value);
-  for (const item of imageItems) {
-    const bytes = new Uint8Array(await item.file.arrayBuffer()); const image = item.file.type === "image/png" || /\.png$/i.test(item.file.name) ? await output.embedPng(bytes) : await output.embedJpg(bytes);
-    let pageWidth; let pageHeight;
-    if (preset === "image") { const scale = Math.min(1, 1440 / Math.max(image.width, image.height)); pageWidth = image.width * scale + margin * 2; pageHeight = image.height * scale + margin * 2; }
-    else { const base = preset === "a4" ? [595.28, 841.89] : [612, 792]; [pageWidth, pageHeight] = image.width > image.height ? [base[1], base[0]] : base; }
-    const page = output.addPage([pageWidth, pageHeight]); const scale = Math.min((pageWidth - margin * 2) / image.width, (pageHeight - margin * 2) / image.height);
-    const width = image.width * scale; const height = image.height * scale; page.drawImage(image, { x: (pageWidth - width) / 2, y: (pageHeight - height) / 2, width, height });
-  }
-  return output.save();
-}
-
 function addResult(bytes, filename, detail) {
   const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })); resultUrls.push(url);
   const card = document.createElement("article"); card.className = "result-card"; const info = document.createElement("div"); const title = document.createElement("strong"); title.textContent = filename; const meta = document.createElement("span"); meta.textContent = `${detail} · ${bytesLabel(bytes.byteLength)}`; info.append(title, meta);
@@ -354,13 +358,13 @@ function addResult(bytes, filename, detail) {
 async function processFiles() {
   if (isProcessing) return;
   clearError(); revokeResults();
-  if ((mode === "images" ? imageItems : pageItems).length === 0) throw new Error(mode === "images" ? "Choose at least one image first." : "Choose a PDF first.");
+  if ((mode === "images" ? imageItems : pageItems).length === 0) throw new Error(mode === "images" ? "Choose at least one image or Office document first." : "Choose a PDF first.");
   setProcessingBusy(true); setStatus("Processing locally in your browser…", 28);
   try {
     if (mode === "organize") {
       const bytes = await buildPdfFromPages(sources, pageItems); addResult(bytes, safePdfName(sources[0].file.name, sources.length > 1 ? "merged" : "organized"), `${pageItems.length} pages`);
     } else if (mode === "images") {
-      const bytes = await buildImagesPdf(); addResult(bytes, "beetales-images.pdf", `${imageItems.length} images`);
+      const bytes = await buildMixedPdf(imageItems); addResult(bytes, "beetales-document.pdf", `${imageItems.length} files`);
     } else if (mode === "extract") {
       const action = activeValue("extract-action"); const chosen = parsePageSelection(elements.pageSelection.value, pageItems.length);
       if (action === "split") { const outputs = await createSplitPdfs(sources[0].document, chosen); outputs.forEach((bytes, i) => addResult(bytes, safePdfName(sources[0].file.name, `page-${chosen[i] + 1}`), "1 page")); elements.resultsTitle.textContent = `${outputs.length} PDFs are ready`; }

@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, degrees, rgb } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
+import * as XLSX from "./vendor/xlsx/xlsx.mjs";
 
 export function parsePageSelection(input, pageCount) {
   const value = String(input || "").trim();
@@ -185,4 +186,132 @@ export async function stampPdf(bytes, options) {
   }
 
   return document.save();
+}
+
+const OFFICE_FONT_SIZE = 11;
+const OFFICE_LINE_HEIGHT = 15;
+const OFFICE_MARGIN = 44;
+const OFFICE_PAGE_WIDTH = 595.28;
+const OFFICE_PAGE_HEIGHT = 841.89;
+
+function wrapText(font, text, fontSize, maxWidth) {
+  const lines = [];
+  for (const paragraph of text.split("\n")) {
+    const words = paragraph.split(" ");
+    let current = "";
+    for (const word of words) {
+      const test = current ? `${current} ${word}` : word;
+      if (font.widthOfTextAtSize(test, fontSize) > maxWidth && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = test;
+      }
+    }
+    if (current) lines.push(current);
+    lines.push("");
+  }
+  return lines;
+}
+
+function addOfficePage(pdfDoc, font) {
+  const page = pdfDoc.addPage([OFFICE_PAGE_WIDTH, OFFICE_PAGE_HEIGHT]);
+  return { page, y: OFFICE_PAGE_HEIGHT - OFFICE_MARGIN };
+}
+
+function drawOfficeLine(page, font, text, fontSize, x, y) {
+  page.drawText(text, { x, y, size: fontSize, font, color: rgb(0, 0, 0) });
+}
+
+function drawOfficeContent(pdfDoc, font, lines, fontSize, title) {
+  const maxWidth = OFFICE_PAGE_WIDTH - OFFICE_MARGIN * 2;
+  let { page, y } = addOfficePage(pdfDoc, font);
+  drawOfficeLine(page, font, title, 16, OFFICE_MARGIN, y);
+  y -= 26;
+  for (const line of lines) {
+    if (y < OFFICE_MARGIN) {
+      const next = addOfficePage(pdfDoc, font);
+      page = next.page;
+      y = next.y;
+    }
+    drawOfficeLine(page, font, line || " ", fontSize, OFFICE_MARGIN, y);
+    y -= line ? OFFICE_LINE_HEIGHT : OFFICE_LINE_HEIGHT * 0.6;
+  }
+}
+
+export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, fileName) {
+  const mammothLib = globalThis.mammoth;
+  if (!mammothLib) throw new Error("mammoth library is not available.");
+  const result = await mammothLib.extractRawText({ arrayBuffer });
+  const text = (result.value || "").trim();
+  if (!text) throw new Error(`"${fileName}" appears to be empty or contains no extractable text.`);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const lines = wrapText(font, text, OFFICE_FONT_SIZE, OFFICE_PAGE_WIDTH - OFFICE_MARGIN * 2);
+  drawOfficeContent(pdfDoc, font, lines, OFFICE_FONT_SIZE, fileName);
+}
+
+export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, fileName) {
+  const data = new Uint8Array(arrayBuffer);
+  const workbook = XLSX.read(data, { type: "array" });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new Error(`"${fileName}" contains no sheets.`);
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+  if (!rows.length) throw new Error(`"${fileName}" contains no data.`);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const maxWidth = OFFICE_PAGE_WIDTH - OFFICE_MARGIN * 2;
+  const textLines = [];
+  for (const row of rows) {
+    const cells = Array.isArray(row) ? row.filter((c) => c != null).map(String) : [String(row)];
+    textLines.push(cells.join("  |  ") || "(empty row)");
+  }
+  const wrapped = wrapText(font, textLines.join("\n"), OFFICE_FONT_SIZE, maxWidth);
+  drawOfficeContent(pdfDoc, font, wrapped, OFFICE_FONT_SIZE, fileName);
+}
+
+export async function convertPptxToPdfPages(arrayBuffer, pdfDoc, fileName) {
+  const JSZipLib = globalThis.JSZip;
+  if (!JSZipLib) throw new Error("JSZip library is not available.");
+  const zip = await JSZipLib.loadAsync(arrayBuffer);
+  const slideFiles = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort();
+  if (!slideFiles.length) throw new Error(`"${fileName}" contains no slides.`);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  for (const slidePath of slideFiles) {
+    const slideNum = slidePath.match(/\d+/)[0];
+    const xml = await zip.files[slidePath].async("text");
+    const texts = Array.from(xml.matchAll(/<a:t[^>]*>([^<]+)<\/a:t>/g)).map((m) => m[1]);
+    const slideText = texts.join(" ").trim();
+    const lines = wrapText(font, slideText || "(empty slide)", OFFICE_FONT_SIZE, OFFICE_PAGE_WIDTH - OFFICE_MARGIN * 2);
+    drawOfficeContent(pdfDoc, font, lines, OFFICE_FONT_SIZE, `${fileName} — Slide ${slideNum}`);
+  }
+}
+
+export async function buildMixedPdf(imageItems) {
+  const output = await PDFDocument.create();
+  for (const item of imageItems) {
+    const type = item.file.type || "";
+    const ext = item.file.name.split(".").pop().toLowerCase();
+    if (type.startsWith("image/") || ["png", "jpg", "jpeg"].includes(ext)) {
+      const bytes = new Uint8Array(await item.file.arrayBuffer());
+      const image = type === "image/png" || ext === "png" ? await output.embedPng(bytes) : await output.embedJpg(bytes);
+      const preset = "image";
+      const margin = 0;
+      const scale = Math.min(1, 1440 / Math.max(image.width, image.height));
+      const pageWidth = image.width * scale + margin * 2;
+      const pageHeight = image.height * scale + margin * 2;
+      const page = output.addPage([pageWidth, pageHeight]);
+      const drawScale = Math.min((pageWidth - margin * 2) / image.width, (pageHeight - margin * 2) / image.height);
+      const width = image.width * drawScale;
+      const height = image.height * drawScale;
+      page.drawImage(image, { x: (pageWidth - width) / 2, y: (pageHeight - height) / 2, width, height });
+    } else if (ext === "docx") {
+      await convertDocxToPdfPages(await item.file.arrayBuffer(), output, item.file.name);
+    } else if (ext === "xlsx") {
+      await convertXlsxToPdfPages(await item.file.arrayBuffer(), output, item.file.name);
+    } else if (ext === "pptx") {
+      await convertPptxToPdfPages(await item.file.arrayBuffer(), output, item.file.name);
+    }
+  }
+  return output.save();
 }
