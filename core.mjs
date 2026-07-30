@@ -249,8 +249,14 @@ function getRenderContainer(cssWidth) {
     document.body.append(el);
   }
   el.style.width = cssPx(cssWidth);
+  el.style.height = "";
   el.innerHTML = "";
   return el;
+}
+
+function resetRenderContainer() {
+  const el = document.getElementById("ofc-render");
+  if (el) el.remove();
 }
 
 async function settle(el) {
@@ -310,6 +316,7 @@ async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt) {
 }
 
 export async function convertDocxToPdfPages(arrayBuffer, pdfDoc) {
+  resetRenderContainer();
   const mammothLib = globalThis.mammoth;
   if (!mammothLib) throw new Error("mammoth library is not available.");
   const size = await detectDocxPageSize(arrayBuffer);
@@ -324,6 +331,7 @@ export async function convertDocxToPdfPages(arrayBuffer, pdfDoc) {
 }
 
 export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
+  resetRenderContainer();
   const data = new Uint8Array(arrayBuffer);
   const workbook = XLSX.read(data, { type: "array" });
   const sheetName = workbook.SheetNames[0];
@@ -565,6 +573,7 @@ function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, m
 }
 
 export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
+  resetRenderContainer();
   try {
     const JSZipLib = globalThis.JSZip;
     if (!JSZipLib) throw new Error("JSZip library is not available.");
