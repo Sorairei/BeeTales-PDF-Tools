@@ -194,96 +194,123 @@ const OFFICE_MARGIN = 44;
 const OFFICE_PAGE_WIDTH = 595.28;
 const OFFICE_PAGE_HEIGHT = 841.89;
 
-function wrapText(font, text, fontSize, maxWidth) {
-  const lines = [];
-  for (const paragraph of text.split("\n")) {
-    const words = paragraph.split(" ");
-    let current = "";
-    for (const word of words) {
-      const test = current ? `${current} ${word}` : word;
-      if (font.widthOfTextAtSize(test, fontSize) > maxWidth && current) {
-        lines.push(current);
-        current = word;
-      } else {
-        current = test;
-      }
-    }
-    if (current) lines.push(current);
-    lines.push("");
-  }
-  return lines;
-}
-
-function addOfficePage(pdfDoc, font) {
+function addOfficePage(pdfDoc) {
   const page = pdfDoc.addPage([OFFICE_PAGE_WIDTH, OFFICE_PAGE_HEIGHT]);
   return { page, y: OFFICE_PAGE_HEIGHT - OFFICE_MARGIN };
 }
 
-function drawOfficeLine(page, font, text, fontSize, x, y) {
-  page.drawText(text, { x, y, size: fontSize, font, color: rgb(0, 0, 0) });
-}
-
-function drawOfficeContent(pdfDoc, font, lines, fontSize, title) {
+function wrapAndDraw(pdfDoc, font, paragraphs, title, baseSize) {
   const maxWidth = OFFICE_PAGE_WIDTH - OFFICE_MARGIN * 2;
-  let { page, y } = addOfficePage(pdfDoc, font);
-  drawOfficeLine(page, font, title, 16, OFFICE_MARGIN, y);
-  y -= 26;
-  for (const line of lines) {
-    if (y < OFFICE_MARGIN) {
-      const next = addOfficePage(pdfDoc, font);
-      page = next.page;
-      y = next.y;
+  let { page, y } = addOfficePage(pdfDoc);
+
+  for (const block of paragraphs) {
+    const size = block.bold ? baseSize + 3 : baseSize;
+    const prefix = block.prefix || "";
+    const indent = block.indent || 0;
+    const words = block.text.split(" ");
+    let current = "";
+    for (const word of words) {
+      const test = current ? `${current} ${word}` : word;
+      const textWidth = font.widthOfTextAtSize(prefix + test, size);
+      if (textWidth > maxWidth - indent && current) {
+        if (y < OFFICE_MARGIN + 10) {
+          const next = addOfficePage(pdfDoc);
+          page = next.page;
+          y = next.y;
+        }
+        page.drawText(prefix + current, { x: OFFICE_MARGIN + indent, y, size, font, color: rgb(0, 0, 0) });
+        y -= size * 1.45;
+        current = word;
+        prefix = "";
+      } else {
+        current = test;
+      }
     }
-    drawOfficeLine(page, font, line || " ", fontSize, OFFICE_MARGIN, y);
-    y -= line ? OFFICE_LINE_HEIGHT : OFFICE_LINE_HEIGHT * 0.6;
+    if (current) {
+      if (y < OFFICE_MARGIN + 10) {
+        const next = addOfficePage(pdfDoc);
+        page = next.page;
+        y = next.y;
+      }
+      page.drawText(prefix + current, { x: OFFICE_MARGIN + indent, y, size, font, color: rgb(0, 0, 0) });
+      y -= size * 1.45;
+    }
+    y -= block.spacing || 4;
   }
 }
 
-export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, fileName) {
+export async function convertDocxToPdfPages(arrayBuffer, pdfDoc) {
   const mammothLib = globalThis.mammoth;
   if (!mammothLib) throw new Error("mammoth library is not available.");
-  const result = await mammothLib.extractRawText({ arrayBuffer });
-  const text = (result.value || "").trim();
-  if (!text) throw new Error(`"${fileName}" appears to be empty or contains no extractable text.`);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const lines = wrapText(font, text, OFFICE_FONT_SIZE, OFFICE_PAGE_WIDTH - OFFICE_MARGIN * 2);
-  drawOfficeContent(pdfDoc, font, lines, OFFICE_FONT_SIZE, fileName);
+  const result = await mammothLib.convertToHtml({ arrayBuffer });
+  const html = (result.value || "").trim();
+  if (!html) throw new Error("The document appears to be empty or contains no extractable text.");
+  const paragraphs = [];
+  const tagRegex = /<(h[1-6]|p|li|blockquote)[^>]*>([\s\S]*?)<\/\1>|<li[^>]*>([\s\S]*?)<\/li>/gi;
+  let match;
+  while ((match = tagRegex.exec(html)) !== null) {
+    const tag = (match[1] || "li").toLowerCase();
+    const content = (match[2] || match[3] || "").replace(/<[^>]+>/g, "").trim();
+    if (!content) continue;
+    if (tag === "li") {
+      paragraphs.push({ text: content, prefix: "• ", indent: 14, bold: false, spacing: 3 });
+    } else if (tag === "blockquote") {
+      paragraphs.push({ text: content, prefix: "", indent: 20, bold: false, spacing: 5 });
+    } else if (tag.match(/^h[1-6]$/)) {
+      const level = Number(tag[1]);
+      paragraphs.push({ text: content, prefix: "", indent: 0, bold: true, spacing: level <= 2 ? 10 : 6 });
+    } else {
+      paragraphs.push({ text: content, prefix: "", indent: 0, bold: false, spacing: 5 });
+    }
+  }
+  if (!paragraphs.length) {
+    const text = html.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    if (text) paragraphs.push({ text, prefix: "", indent: 0, bold: false, spacing: 5 });
+  }
+  if (!paragraphs.length) throw new Error("The document appears to be empty or contains no extractable text.");
+  wrapAndDraw(pdfDoc, font, paragraphs, null, OFFICE_FONT_SIZE);
 }
 
-export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, fileName) {
+export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
   const data = new Uint8Array(arrayBuffer);
   const workbook = XLSX.read(data, { type: "array" });
   const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new Error(`"${fileName}" contains no sheets.`);
+  if (!sheetName) throw new Error("The spreadsheet contains no sheets.");
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
-  if (!rows.length) throw new Error(`"${fileName}" contains no data.`);
+  if (!rows.length) throw new Error("The spreadsheet contains no data.");
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const maxWidth = OFFICE_PAGE_WIDTH - OFFICE_MARGIN * 2;
-  const textLines = [];
+  const paragraphs = [];
+  let headerRow = true;
   for (const row of rows) {
     const cells = Array.isArray(row) ? row.filter((c) => c != null).map(String) : [String(row)];
-    textLines.push(cells.join("  |  ") || "(empty row)");
+    const text = cells.join("  |  ") || "";
+    if (text) {
+      paragraphs.push({ text, prefix: "", indent: 0, bold: headerRow, spacing: 4 });
+      headerRow = false;
+    }
   }
-  const wrapped = wrapText(font, textLines.join("\n"), OFFICE_FONT_SIZE, maxWidth);
-  drawOfficeContent(pdfDoc, font, wrapped, OFFICE_FONT_SIZE, fileName);
+  wrapAndDraw(pdfDoc, font, paragraphs, null, OFFICE_FONT_SIZE);
 }
 
-export async function convertPptxToPdfPages(arrayBuffer, pdfDoc, fileName) {
+export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
   const JSZipLib = globalThis.JSZip;
   if (!JSZipLib) throw new Error("JSZip library is not available.");
   const zip = await JSZipLib.loadAsync(arrayBuffer);
   const slideFiles = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
     .sort();
-  if (!slideFiles.length) throw new Error(`"${fileName}" contains no slides.`);
+  if (!slideFiles.length) throw new Error("The presentation contains no slides.");
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   for (const slidePath of slideFiles) {
     const slideNum = slidePath.match(/\d+/)[0];
     const xml = await zip.files[slidePath].async("text");
     const texts = Array.from(xml.matchAll(/<a:t[^>]*>([^<]+)<\/a:t>/g)).map((m) => m[1]);
-    const slideText = texts.join(" ").trim();
-    const lines = wrapText(font, slideText || "(empty slide)", OFFICE_FONT_SIZE, OFFICE_PAGE_WIDTH - OFFICE_MARGIN * 2);
-    drawOfficeContent(pdfDoc, font, lines, OFFICE_FONT_SIZE, `${fileName} — Slide ${slideNum}`);
+    const paragraphs = [{ text: `Slide ${slideNum}`, prefix: "", indent: 0, bold: true, spacing: 10 }];
+    for (const t of texts) {
+      if (t.trim()) paragraphs.push({ text: t.trim(), prefix: "", indent: 14, bold: false, spacing: 4 });
+    }
+    wrapAndDraw(pdfDoc, font, paragraphs, null, OFFICE_FONT_SIZE);
   }
 }
 
