@@ -204,11 +204,15 @@ async function detectDocxPageSize(arrayBuffer) {
     const file = zip.files["word/document.xml"];
     if (!file) return null;
     const xml = await file.async("text");
-    const m = xml.match(/<w:pgSz[^>]*w:w="(\d+)"[^>]*w:h="(\d+)"|<w:pgSz[^>]*w:h="(\d+)"[^>]*w:w="(\d+)"/);
-    if (m) {
-      const w = Number(m[1] || m[4]) / 20;
-      const h = Number(m[2] || m[3]) / 20;
-      if (w > 0 && h > 0) return { width: w, height: h };
+    const tag = xml.match(/<[^>]*pgSz[^>]*\/?>/i);
+    if (tag) {
+      const w = tag[0].match(/\bw:w\s*=\s*["'](\d+)["']/i) || tag[0].match(/\bw\s*=\s*["'](\d+)["']/i);
+      const h = tag[0].match(/\bw:h\s*=\s*["'](\d+)["']/i) || tag[0].match(/\bh\s*=\s*["'](\d+)["']/i);
+      if (w && h) {
+        const width = Number(w[1]) / 20;
+        const height = Number(h[1]) / 20;
+        if (width > 0 && height > 0) return { width, height };
+      }
     }
   } catch {}
   return null;
@@ -222,11 +226,15 @@ async function detectPptxPageSize(arrayBuffer) {
     const file = zip.files["ppt/presentation.xml"];
     if (!file) return null;
     const xml = await file.async("text");
-    const m = xml.match(/<p:slideSize[^>]*cx="(\d+)"[^>]*cy="(\d+)"|<p:slideSize[^>]*cy="(\d+)"[^>]*cx="(\d+)"/);
-    if (m) {
-      const w = Number(m[1] || m[4]) / 12700;
-      const h = Number(m[2] || m[3]) / 12700;
-      if (w > 0 && h > 0) return { width: w, height: h };
+    const tag = xml.match(/<[^>]*slideSize[^>]*\/?>/i);
+    if (tag) {
+      const cx = tag[0].match(/\bcx\s*=\s*["'](\d+)["']/i);
+      const cy = tag[0].match(/\bcy\s*=\s*["'](\d+)["']/i);
+      if (cx && cy) {
+        const w = Number(cx[1]) / 12700;
+        const h = Number(cy[1]) / 12700;
+        if (w > 0 && h > 0) return { width: w, height: h };
+      }
     }
   } catch {}
   return null;
@@ -320,8 +328,6 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
 
 function child(el, tag) { if (!el) return null; for (const c of el.children) if (c.localName === tag) return c; return null; }
 function children(el, tag) { if (!el) return []; return Array.from(el.children).filter((c) => c.localName === tag); }
-
-function emuPx(emu, slideDim, containerDim) { return (emu / slideDim) * containerDim; }
 
 function parseColor(el) {
   if (!el) return null;
@@ -422,6 +428,20 @@ function getREmbed(el) {
       || el.getAttribute("r:embed");
 }
 
+function bgHtml(cSld, relsMap, mediaUrls) {
+  let h = "";
+  const bg = child(cSld, "bg");
+  if (!bg) return h;
+  const bgPr = child(bg, "bgPr");
+  if (!bgPr) return h;
+  const ref = getREmbed(bgPr);
+  if (ref && relsMap[ref] && mediaUrls[relsMap[ref]])
+    h += `<img src="${mediaUrls[relsMap[ref]]}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none">`;
+  const c = parseColor(child(bgPr, "solidFill"));
+  if (c) h += `<div style="position:absolute;top:0;left:0;width:100%;height:100%;background:${c};pointer-events:none"></div>`;
+  return h;
+}
+
 async function loadMediaUrls(zip) {
   const map = {};
   const tasks = [];
@@ -480,6 +500,9 @@ function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, m
     }
   }
 
+  function pct(v) { return (v / slideW) * 100; }
+  function pctH(v) { return (v / slideH) * 100; }
+
   function posDiv(el, gx, gy) {
     if (!el) return;
     const ln = el.localName;
@@ -488,13 +511,13 @@ function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, m
       if (!spPr) return;
       const xfrm = getXfrm(spPr);
       if (!xfrm) return;
-      const x = emuPx(xfrm.x + gx, slideW, containerW), y = emuPx(xfrm.y + gy, slideH, containerH);
-      const w = emuPx(xfrm.cx, slideW, containerW), h = emuPx(xfrm.cy, slideH, containerH);
+      const xPct = pct(xfrm.x + gx), yPct = pctH(xfrm.y + gy);
+      const wPct = pct(xfrm.cx), hPct = pctH(xfrm.cy);
       const bc = shapeBackCss(spPr);
       const bcStr = cssText(bc);
       const txBody = child(el, "txBody");
       const inner = txBody ? buildTextHtml(txBody) : (child(spPr, "prstGeom") ? "&nbsp;" : "");
-      stack.push(`<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box${bcStr ? ";" + bcStr : ""}">${inner}</div>`);
+      stack.push(`<div style="position:absolute;left:${xPct}%;top:${yPct}%;width:${wPct}%;height:${hPct}%;box-sizing:border-box${bcStr ? ";" + bcStr : ""}">${inner}</div>`);
     } else if (ln === "pic") {
       const blipFill = child(el, "blipFill");
       if (!blipFill) return;
@@ -506,9 +529,9 @@ function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, m
       if (!spPr) return;
       const xfrm = getXfrm(spPr);
       if (!xfrm) return;
-      const x = emuPx(xfrm.x + gx, slideW, containerW), y = emuPx(xfrm.y + gy, slideH, containerH);
-      const w = emuPx(xfrm.cx, slideW, containerW), h = emuPx(xfrm.cy, slideH, containerH);
-      stack.push(`<img src="${mediaUrls[relsMap[ref]]}" style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;object-fit:fill">`);
+      const xPct = pct(xfrm.x + gx), yPct = pctH(xfrm.y + gy);
+      const wPct = pct(xfrm.cx), hPct = pctH(xfrm.cy);
+      stack.push(`<img src="${mediaUrls[relsMap[ref]]}" style="position:absolute;left:${xPct}%;top:${yPct}%;width:${wPct}%;height:${hPct}%;object-fit:fill">`);
     }
   }
 
@@ -557,13 +580,41 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
         const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
         const relsDoc = zip.files[relsPath] ? new DOMParser().parseFromString(await zip.files[relsPath].async("text"), "text/xml") : null;
         const relsMap = {};
+        let layoutPath = null;
         if (relsDoc) {
           const relEls = relsDoc.getElementsByTagName("Relationship");
           for (const rel of relEls) {
             const id = rel.getAttribute("Id");
             const target = rel.getAttribute("Target");
             if (id && target) relsMap[id] = target.startsWith("../") ? target.replace("../", "ppt/") : "ppt/" + target;
+            const type = rel.getAttribute("Type");
+            if (type && type.includes("slideLayout") && target) layoutPath = target.startsWith("../") ? target.replace("../", "ppt/") : "ppt/" + target;
           }
+        }
+
+        let extraBg = "";
+        if (layoutPath && zip.files[layoutPath]) {
+          try {
+            const lxml = await zip.files[layoutPath].async("text");
+            const ldoc = new DOMParser().parseFromString(lxml, "text/xml");
+            const lCSld = ldoc.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0] || child(ldoc.documentElement, "cSld");
+            if (lCSld) {
+              const lNum = layoutPath.match(/slideLayout(\d+)\.xml$/);
+              if (lNum) {
+                const lRelsPath = `ppt/slideLayouts/_rels/slideLayout${lNum[1]}.xml.rels`;
+                const lRelsDoc = zip.files[lRelsPath] ? new DOMParser().parseFromString(await zip.files[lRelsPath].async("text"), "text/xml") : null;
+                const lRelsMap = {};
+                if (lRelsDoc) {
+                  for (const r of lRelsDoc.getElementsByTagName("Relationship")) {
+                    const id = r.getAttribute("Id");
+                    const target = r.getAttribute("Target");
+                    if (id && target) lRelsMap[id] = target.startsWith("../") ? target.replace("../", "ppt/") : "ppt/" + target;
+                  }
+                }
+                extraBg = bgHtml(lCSld, lRelsMap, mediaUrls);
+              }
+            }
+          } catch {}
         }
 
         const xml = await zip.files[slidePath].async("text");
@@ -573,7 +624,7 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
 
         stripHiddenFlags(cSld);
 
-        const slideHtml = buildSlideHtml(cSld, slideWEmu, slideHEmu, cssW, cssH, relsMap, mediaUrls);
+        const slideHtml = extraBg + buildSlideHtml(cSld, slideWEmu, slideHEmu, cssW, cssH, relsMap, mediaUrls);
         await captureHtml(pdfDoc, slideHtml, pw, ph);
       } catch (err) {
         console.warn("Skipped slide:", slidePath, err.message);
