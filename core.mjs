@@ -318,6 +318,189 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
     595.28, 841.89);
 }
 
+function child(el, tag) { for (const c of el.children) if (c.localName === tag) return c; return null; }
+function children(el, tag) { return Array.from(el.children).filter((c) => c.localName === tag); }
+
+function emuPx(emu, slideDim, containerDim) { return (emu / slideDim) * containerDim; }
+
+function parseColor(el) {
+  const srgb = child(el, "srgbClr");
+  return srgb ? "#" + srgb.getAttribute("val") : null;
+}
+
+function runCss(rPr) {
+  const s = {};
+  if (!rPr) return s;
+  const sz = rPr.getAttribute("sz");
+  if (sz) s["font-size"] = (parseInt(sz) / 100) + "pt";
+  if (rPr.getAttribute("b") === "1") s["font-weight"] = "bold";
+  if (rPr.getAttribute("i") === "1") s["font-style"] = "italic";
+  const u = rPr.getAttribute("u");
+  if (u && u !== "none") s["text-decoration"] = "underline";
+  const c = parseColor(child(rPr, "solidFill"));
+  if (c) s.color = c;
+  const latin = child(rPr, "latin");
+  if (latin) { const tf = latin.getAttribute("typeface"); if (tf) s["font-family"] = `"${tf}",sans-serif`; }
+  return s;
+}
+
+function cssText(o) { return Object.entries(o).map(([k, v]) => `${k}:${v}`).join(";"); }
+
+function escapeHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+function buildTextHtml(txBody) {
+  const parts = [];
+  for (const p of children(txBody, "p")) {
+    const pPr = child(p, "pPr");
+    let pStyle = "";
+    const algn = pPr && pPr.getAttribute("algn");
+    if (algn === "ctr") pStyle += "text-align:center;";
+    else if (algn === "r") pStyle += "text-align:right;";
+    else if (algn === "just") pStyle += "text-align:justify;";
+    const indent = pPr && pPr.getAttribute("lvl") ? parseInt(pPr.getAttribute("lvl")) : 0;
+    if (indent) pStyle += `padding-left:${indent * 20}pt;`;
+    parts.push(`<p style="${pStyle}margin:0">`);
+    for (const childEl of p.children) {
+      if (childEl.localName === "r") {
+        const t = child(childEl, "t");
+        if (!t) continue;
+        const cs = runCss(child(childEl, "rPr"));
+        parts.push(Object.keys(cs).length ? `<span style="${cssText(cs)}">${escapeHtml(t.textContent)}</span>` : escapeHtml(t.textContent));
+      } else if (childEl.localName === "br") {
+        parts.push("<br>");
+      }
+    }
+    parts.push("</p>");
+  }
+  return parts.join("");
+}
+
+function getXfrm(spPr) {
+  const xfrm = child(spPr, "xfrm");
+  if (!xfrm) return null;
+  const off = child(xfrm, "off");
+  const ext = child(xfrm, "ext");
+  if (!off || !ext) return null;
+  return {
+    x: parseInt(off.getAttribute("x") || "0"),
+    y: parseInt(off.getAttribute("y") || "0"),
+    cx: parseInt(ext.getAttribute("cx") || "0"),
+    cy: parseInt(ext.getAttribute("cy") || "0"),
+  };
+}
+
+function shapeBackCss(spPr) {
+  const s = {};
+  const solid = child(spPr, "solidFill");
+  if (solid) { const c = parseColor(solid); if (c) s["background-color"] = c; }
+  const grad = child(spPr, "gradFill");
+  if (grad) {
+    const gsLst = child(grad, "gsLst");
+    if (gsLst) {
+      const stops = children(gsLst, "gs");
+      if (stops.length) {
+        const a = parseColor(stops[0]), b = parseColor(stops[stops.length - 1]);
+        if (a && b) s.background = `linear-gradient(${a},${b})`;
+      }
+    }
+  }
+  const ln = child(spPr, "ln");
+  if (ln) {
+    const w = ln.getAttribute("w");
+    if (w) s["border-width"] = (parseInt(w) / 12700) + "pt";
+    const lc = parseColor(child(ln, "solidFill"));
+    if (lc) s["border-color"] = lc;
+    s["border-style"] = "solid";
+  }
+  return s;
+}
+
+function getREmbed(el) {
+  return el.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "embed")
+      || el.getAttribute("r:embed");
+}
+
+async function loadMediaUrls(zip) {
+  const map = {};
+  const tasks = [];
+  for (const path of Object.keys(zip.files)) {
+    if (/^ppt\/media\//.test(path) && !zip.files[path].dir) {
+      tasks.push((async () => {
+        const ext = path.split(".").pop().toLowerCase();
+        const mime = ext === "png" ? "image/png" : ext === "svg" ? "image/svg+xml" : "image/jpeg";
+        const b64 = await zip.files[path].async("base64");
+        map[path] = `data:${mime};base64,${b64}`;
+      })());
+    }
+  }
+  await Promise.all(tasks);
+  return map;
+}
+
+function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, mediaUrls) {
+  const stack = [];
+  stack.push(`<div style="position:relative;overflow:hidden;width:${containerW}px;height:${containerH}px;background:#fff;font-family:Calibri,Segoe UI,Roboto,sans-serif;color:#000;box-sizing:border-box">`);
+
+  const bg = child(cSld, "bg");
+  if (bg) {
+    const bgPr = child(bg, "bgPr");
+    if (bgPr) {
+      const bgRef = getREmbed(bgPr);
+      if (bgRef && relsMap[bgRef] && mediaUrls[relsMap[bgRef]])
+        stack.push(`<img src="${mediaUrls[relsMap[bgRef]]}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none">`);
+      const bgC = parseColor(child(bgPr, "solidFill"));
+      if (bgC) stack.push(`<div style="position:absolute;top:0;left:0;width:100%;height:100%;background:${bgC};pointer-events:none"></div>`);
+    }
+  }
+
+  function posDiv(el, gx, gy) {
+    const ln = el.localName;
+    if (ln === "sp") {
+      const spPr = child(el, "spPr");
+      if (!spPr) return;
+      const xfrm = getXfrm(spPr);
+      if (!xfrm) return;
+      const x = emuPx(xfrm.x + gx, slideW, containerW), y = emuPx(xfrm.y + gy, slideH, containerH);
+      const w = emuPx(xfrm.cx, slideW, containerW), h = emuPx(xfrm.cy, slideH, containerH);
+      const bc = shapeBackCss(spPr);
+      const bcStr = cssText(bc);
+      const txBody = child(el, "txBody");
+      const inner = txBody ? buildTextHtml(txBody) : (child(spPr, "prstGeom") ? "&nbsp;" : "");
+      stack.push(`<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box${bcStr ? ";" + bcStr : ""}">${inner}</div>`);
+    } else if (ln === "pic") {
+      const blipFill = child(el, "blipFill");
+      if (!blipFill) return;
+      const blip = child(blipFill, "blip");
+      if (!blip) return;
+      const ref = getREmbed(blip);
+      if (!ref || !relsMap[ref] || !mediaUrls[relsMap[ref]]) return;
+      const spPr = child(el, "spPr");
+      if (!spPr) return;
+      const xfrm = getXfrm(spPr);
+      if (!xfrm) return;
+      const x = emuPx(xfrm.x + gx, slideW, containerW), y = emuPx(xfrm.y + gy, slideH, containerH);
+      const w = emuPx(xfrm.cx, slideW, containerW), h = emuPx(xfrm.cy, slideH, containerH);
+      stack.push(`<img src="${mediaUrls[relsMap[ref]]}" style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;object-fit:fill">`);
+    }
+  }
+
+  const spTree = child(cSld, "spTree");
+  if (spTree) {
+    for (const el of spTree.children) {
+      if (el.localName === "grpSp") {
+        const grpXfrm = getXfrm(child(el, "grpSpPr"));
+        if (!grpXfrm) continue;
+        for (const gc of el.children) posDiv(gc, grpXfrm.x, grpXfrm.y);
+      } else {
+        posDiv(el, 0, 0);
+      }
+    }
+  }
+
+  stack.push("</div>");
+  return stack.join("\n");
+}
+
 export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
   const JSZipLib = globalThis.JSZip;
   if (!JSZipLib) throw new Error("JSZip library is not available.");
@@ -330,21 +513,39 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
     .sort();
   if (!slideFiles.length) throw new Error("The presentation contains no slides.");
 
+  const mediaUrls = await loadMediaUrls(zip);
+
+  const slideW = size ? size.width * 12700 : 12192000;
+  const slideH = size ? size.height * 12700 : 6858000;
+  const containerW = 960;
+  const containerH = Math.round(containerW * slideH / slideW);
+
   for (const slidePath of slideFiles) {
-    const xml = await zip.files[slidePath].async("text");
-    const texts = [];
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, "text/xml");
-    const tElements = doc.getElementsByTagNameNS("*", "t");
-    for (const t of tElements) {
-      if (t.textContent.trim()) texts.push(t.textContent.trim());
+    const slideNum = slidePath.match(/slide(\d+)\.xml$/)[1];
+    const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
+    const relsDoc = zip.files[relsPath] ? new DOMParser().parseFromString(await zip.files[relsPath].async("text"), "text/xml") : null;
+    const relsMap = {};
+    if (relsDoc) {
+      for (const tagName of ["Relationship", "p:Relationship"]) {
+        const els = relsDoc.getElementsByTagName(tagName);
+        if (els && els.length) {
+          for (const rel of els) {
+            const id = rel.getAttribute("Id");
+            const target = rel.getAttribute("Target");
+            if (id && target) relsMap[id] = target.startsWith("../") ? target.replace("../", "ppt/") : "ppt/" + target;
+          }
+          break;
+        }
+      }
     }
-    const slideHtml = texts
-      .map((t) => `<p style="margin:0 0 8px 0;font-size:${t === texts[0] ? "20pt" : "14pt"};font-weight:${t === texts[0] ? "700" : "400"}">${t}</p>`)
-      .join("");
-    await captureHtml(pdfDoc,
-      `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;color:#000;padding:72px">${slideHtml}</div>`,
-      pw, ph);
+
+    const xml = await zip.files[slidePath].async("text");
+    const doc = new DOMParser().parseFromString(xml, "text/xml");
+    const cSld = doc.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0] || child(doc.documentElement, "cSld") || doc.querySelector("cSld");
+    if (!cSld) continue;
+
+    const slideHtml = buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, mediaUrls);
+    await captureHtml(pdfDoc, slideHtml, pw, ph);
   }
 }
 
