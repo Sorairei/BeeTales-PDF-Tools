@@ -223,7 +223,7 @@ function getRenderContainer(cssWidth) {
   if (!el) {
     el = document.createElement("div");
     el.id = "ofc-render";
-    el.style.cssText = `position:fixed;top:0;left:-9999px;background:#fff;z-index:-1;box-sizing:border-box`;
+    el.style.cssText = `position:fixed;top:0;left:0;z-index:-9999;opacity:1;background:#fff;box-sizing:border-box`;
     document.body.append(el);
   }
   el.style.width = cssPx(cssWidth);
@@ -248,7 +248,26 @@ async function settle(el) {
   }
   await new Promise((r) => requestAnimationFrame(r));
   await new Promise((r) => requestAnimationFrame(r));
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 50));
+}
+
+/** Check if a canvas has non-white content */
+function isCanvasBlank(canvas) {
+  const ctx = canvas.getContext("2d");
+  const data = ctx.getImageData(0, 0, canvas.width, Math.min(16, canvas.height)).data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] < 250 || data[i + 1] < 250 || data[i + 2] < 250) return false;
+  }
+  return true;
+}
+
+/** Wait until the canvas has visible content or max attempts reached */
+async function waitForCanvasContent(canvas, maxAttempts = 5) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (!isCanvasBlank(canvas)) return;
+    await new Promise((r) => requestAnimationFrame(r));
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt) {
@@ -334,13 +353,18 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
     const ph = heightEmu / 12700;
     const cssW = Math.round(ptToCss(pw));
     for (let i = 0; i < renderer.slideCount; i++) {
-      const canvas = document.createElement("canvas");
-      const rw = Math.round(cssW * CAPTURE_SCALE);
-      await renderer.renderSlide(i, canvas, rw);
-      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
-      const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
-      const page = pdfDoc.addPage([pw, ph]);
-      page.drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+      try {
+        const canvas = document.createElement("canvas");
+        const rw = Math.round(cssW * CAPTURE_SCALE);
+        await renderer.renderSlide(i, canvas, rw);
+        await waitForCanvasContent(canvas);
+        const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
+        const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+        const page = pdfDoc.addPage([pw, ph]);
+        page.drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+      } catch (err) {
+        console.warn("Skipped blank/failed slide", i + 1, err.message);
+      }
     }
   } finally {
     renderer.destroy();
