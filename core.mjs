@@ -218,28 +218,6 @@ async function detectDocxPageSize(arrayBuffer) {
   return null;
 }
 
-async function detectPptxPageSize(arrayBuffer) {
-  try {
-    const JSZipLib = globalThis.JSZip;
-    if (!JSZipLib) return null;
-    const zip = await JSZipLib.loadAsync(arrayBuffer);
-    const file = zip.files["ppt/presentation.xml"];
-    if (!file) return null;
-    const xml = await file.async("text");
-    const tag = xml.match(/<[^>]*slideSize[^>]*\/?>/i);
-    if (tag) {
-      const cx = tag[0].match(/\bcx\s*=\s*["'](\d+)["']/i);
-      const cy = tag[0].match(/\bcy\s*=\s*["'](\d+)["']/i);
-      if (cx && cy) {
-        const w = Number(cx[1]) / 12700;
-        const h = Number(cy[1]) / 12700;
-        if (w > 0 && h > 0) return { width: w, height: h };
-      }
-    }
-  } catch {}
-  return null;
-}
-
 function getRenderContainer(cssWidth) {
   let el = document.getElementById("ofc-render");
   if (!el) {
@@ -344,313 +322,28 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
     595.28, 841.89);
 }
 
-function child(el, tag) { if (!el) return null; for (const c of el.children) if (c.localName === tag) return c; return null; }
-function children(el, tag) { if (!el) return []; return Array.from(el.children).filter((c) => c.localName === tag); }
-
-function parseColor(el) {
-  if (!el) return null;
-  const srgb = child(el, "srgbClr");
-  return srgb ? "#" + srgb.getAttribute("val") : null;
-}
-
-function runCss(rPr) {
-  const s = {};
-  if (!rPr) return s;
-  const sz = rPr.getAttribute("sz");
-  if (sz) s["font-size"] = (parseInt(sz) / 100) + "pt";
-  if (rPr.getAttribute("b") === "1") s["font-weight"] = "bold";
-  if (rPr.getAttribute("i") === "1") s["font-style"] = "italic";
-  const u = rPr.getAttribute("u");
-  if (u && u !== "none") s["text-decoration"] = "underline";
-  const c = parseColor(child(rPr, "solidFill"));
-  if (c) s.color = c;
-  const latin = child(rPr, "latin");
-  if (latin) { const tf = latin.getAttribute("typeface"); if (tf) s["font-family"] = `"${tf}",sans-serif`; }
-  return s;
-}
-
-function cssText(o) { return Object.entries(o).map(([k, v]) => `${k}:${v}`).join(";"); }
-
-function escapeHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
-
-function buildTextHtml(txBody) {
-  const parts = [];
-  for (const p of children(txBody, "p")) {
-    const pPr = child(p, "pPr");
-    let pStyle = "";
-    const algn = pPr && pPr.getAttribute("algn");
-    if (algn === "ctr") pStyle += "text-align:center;";
-    else if (algn === "r") pStyle += "text-align:right;";
-    else if (algn === "just") pStyle += "text-align:justify;";
-    const indent = pPr && pPr.getAttribute("lvl") ? parseInt(pPr.getAttribute("lvl")) : 0;
-    if (indent) pStyle += `padding-left:${indent * 20}pt;`;
-    parts.push(`<p style="${pStyle}margin:0">`);
-    for (const childEl of p.children) {
-      if (childEl.localName === "r") {
-        const t = child(childEl, "t");
-        if (!t) continue;
-        const cs = runCss(child(childEl, "rPr"));
-        parts.push(Object.keys(cs).length ? `<span style="${cssText(cs)}">${escapeHtml(t.textContent)}</span>` : escapeHtml(t.textContent));
-      } else if (childEl.localName === "br") {
-        parts.push("<br>");
-      }
-    }
-    parts.push("</p>");
-  }
-  return parts.join("");
-}
-
-function getXfrm(spPr) {
-  if (!spPr) return null;
-  const xfrm = child(spPr, "xfrm");
-  if (!xfrm) return null;
-  const off = child(xfrm, "off");
-  const ext = child(xfrm, "ext");
-  if (!off || !ext) return null;
-  return {
-    x: parseInt(off.getAttribute("x") || "0"),
-    y: parseInt(off.getAttribute("y") || "0"),
-    cx: parseInt(ext.getAttribute("cx") || "0"),
-    cy: parseInt(ext.getAttribute("cy") || "0"),
-  };
-}
-
-function shapeBackCss(spPr) {
-  const s = {};
-  const solid = child(spPr, "solidFill");
-  if (solid) { const c = parseColor(solid); if (c) s["background-color"] = c; }
-  const grad = child(spPr, "gradFill");
-  if (grad) {
-    const gsLst = child(grad, "gsLst");
-    if (gsLst) {
-      const stops = children(gsLst, "gs");
-      if (stops.length) {
-        const a = parseColor(stops[0]), b = parseColor(stops[stops.length - 1]);
-        if (a && b) s.background = `linear-gradient(${a},${b})`;
-      }
-    }
-  }
-  const ln = child(spPr, "ln");
-  if (ln) {
-    const w = ln.getAttribute("w");
-    if (w) s["border-width"] = (parseInt(w) / 12700) + "pt";
-    const lc = parseColor(child(ln, "solidFill"));
-    if (lc) s["border-color"] = lc;
-    s["border-style"] = "solid";
-  }
-  return s;
-}
-
-function getREmbed(el) {
-  return el.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "embed")
-      || el.getAttribute("r:embed");
-}
-
-function bgHtml(cSld, relsMap, mediaUrls) {
-  let h = "";
-  const bg = child(cSld, "bg");
-  if (!bg) return h;
-  const bgPr = child(bg, "bgPr");
-  if (!bgPr) return h;
-  const ref = getREmbed(bgPr);
-  if (ref && relsMap[ref] && mediaUrls[relsMap[ref]])
-    h += `<img src="${mediaUrls[relsMap[ref]]}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none">`;
-  const c = parseColor(child(bgPr, "solidFill"));
-  if (c) h += `<div style="position:absolute;top:0;left:0;width:100%;height:100%;background:${c};pointer-events:none"></div>`;
-  return h;
-}
-
-async function loadMediaUrls(zip) {
-  const map = {};
-  const tasks = [];
-  for (const path of Object.keys(zip.files)) {
-    if (/^ppt\/media\//.test(path) && !zip.files[path].dir) {
-      tasks.push((async () => {
-        const ext = path.split(".").pop().toLowerCase();
-        const mime = ext === "png" ? "image/png" : ext === "svg" ? "image/svg+xml" : "image/jpeg";
-        const b64 = await zip.files[path].async("base64");
-        map[path] = `data:${mime};base64,${b64}`;
-      })());
-    }
-  }
-  await Promise.all(tasks);
-  return map;
-}
-
-function stripHiddenFlags(cSld) {
-  const spTree = child(cSld, "spTree");
-  if (!spTree) return;
-  const elements = [];
-  for (const el of spTree.children) {
-    const ln = el.localName;
-    if (ln !== "sp" && ln !== "pic") continue;
-    const nvPr = child(el, ln === "pic" ? "nvPicPr" : "nvSpPr");
-    const cNvPr = nvPr && child(nvPr, "cNvPr");
-    if (cNvPr && cNvPr.getAttribute("hidden") === "1") cNvPr.removeAttribute("hidden");
-    elements.push(cNvPr);
-  }
-  const timing = child(cSld.parentElement, "timing");
-  if (!timing) return;
-  const tgts = timing.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "spTgt") || timing.getElementsByTagName("spTgt");
-  const animated = new Set();
-  for (const t of tgts) {
-    const id = t.getAttribute("spid");
-    if (id) animated.add(id);
-  }
-  for (const cNvPr of elements) {
-    if (cNvPr && animated.has(cNvPr.getAttribute("id"))) cNvPr.removeAttribute("hidden");
-  }
-}
-
-function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, mediaUrls) {
-  const stack = [];
-  stack.push(`<div style="position:relative;overflow:hidden;width:${containerW}px;height:${containerH}px;background:#fff;font-family:Calibri,Segoe UI,Roboto,sans-serif;color:#000;box-sizing:border-box">`);
-
-  const bg = child(cSld, "bg");
-  if (bg) {
-    const bgPr = child(bg, "bgPr");
-    if (bgPr) {
-      const bgRef = getREmbed(bgPr);
-      if (bgRef && relsMap[bgRef] && mediaUrls[relsMap[bgRef]])
-        stack.push(`<img src="${mediaUrls[relsMap[bgRef]]}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;pointer-events:none">`);
-      const bgC = parseColor(child(bgPr, "solidFill"));
-      if (bgC) stack.push(`<div style="position:absolute;top:0;left:0;width:100%;height:100%;background:${bgC};pointer-events:none"></div>`);
-    }
-  }
-
-  function pct(v) { return (v / slideW) * 100; }
-  function pctH(v) { return (v / slideH) * 100; }
-
-  function posDiv(el, gx, gy) {
-    if (!el) return;
-    const ln = el.localName;
-    if (ln === "sp") {
-      const spPr = child(el, "spPr");
-      if (!spPr) return;
-      const xfrm = getXfrm(spPr);
-      if (!xfrm) return;
-      const xPct = pct(xfrm.x + gx), yPct = pctH(xfrm.y + gy);
-      const wPct = pct(xfrm.cx), hPct = pctH(xfrm.cy);
-      const bc = shapeBackCss(spPr);
-      const bcStr = cssText(bc);
-      const txBody = child(el, "txBody");
-      const inner = txBody ? buildTextHtml(txBody) : (child(spPr, "prstGeom") ? "&nbsp;" : "");
-      stack.push(`<div style="position:absolute;left:${xPct}%;top:${yPct}%;width:${wPct}%;height:${hPct}%;box-sizing:border-box${bcStr ? ";" + bcStr : ""}">${inner}</div>`);
-    } else if (ln === "pic") {
-      const blipFill = child(el, "blipFill");
-      if (!blipFill) return;
-      const blip = child(blipFill, "blip");
-      if (!blip) return;
-      const ref = getREmbed(blip);
-      if (!ref || !relsMap[ref] || !mediaUrls[relsMap[ref]]) return;
-      const spPr = child(el, "spPr");
-      if (!spPr) return;
-      const xfrm = getXfrm(spPr);
-      if (!xfrm) return;
-      const xPct = pct(xfrm.x + gx), yPct = pctH(xfrm.y + gy);
-      const wPct = pct(xfrm.cx), hPct = pctH(xfrm.cy);
-      stack.push(`<img src="${mediaUrls[relsMap[ref]]}" style="position:absolute;left:${xPct}%;top:${yPct}%;width:${wPct}%;height:${hPct}%;object-fit:fill">`);
-    }
-  }
-
-  const spTree = child(cSld, "spTree");
-  if (spTree) {
-    for (const el of spTree.children) {
-      if (el.localName === "grpSp") {
-        const grpSpPr = child(el, "grpSpPr");
-        if (!grpSpPr) continue;
-        const grpXfrm = getXfrm(grpSpPr);
-        if (!grpXfrm) continue;
-        for (const gc of el.children) posDiv(gc, grpXfrm.x, grpXfrm.y);
-      } else {
-        posDiv(el, 0, 0);
-      }
-    }
-  }
-
-  stack.push("</div>");
-  return stack.join("\n");
-}
-
 export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
   resetRenderContainer();
+  const { PptxRenderer } = await import("./vendor/pptx-browser/index.js");
+  const renderer = new PptxRenderer();
   try {
-    const JSZipLib = globalThis.JSZip;
-    if (!JSZipLib) throw new Error("JSZip library is not available.");
-    const size = await detectPptxPageSize(arrayBuffer);
-    const pw = size ? size.width : 595.28;
-    const ph = size ? size.height : 841.89;
-    const zip = await JSZipLib.loadAsync(arrayBuffer);
-    const slideFiles = Object.keys(zip.files)
-      .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
-      .sort();
-    if (!slideFiles.length) throw new Error("No slides found in this presentation.");
-
-    const mediaUrls = await loadMediaUrls(zip);
-
-    const slideWEmu = Math.round(pw * 12700);
-    const slideHEmu = Math.round(ph * 12700);
+    await renderer.load(arrayBuffer);
+    if (!renderer.slideCount) throw new Error("No slides found in this presentation.");
+    const { widthEmu, heightEmu } = renderer.getInfo();
+    const pw = widthEmu / 12700;
+    const ph = heightEmu / 12700;
     const cssW = Math.round(ptToCss(pw));
-    const cssH = Math.round(ptToCss(ph));
-
-    for (const slidePath of slideFiles) {
-      try {
-        const slideNum = slidePath.match(/slide(\d+)\.xml$/)[1];
-        const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
-        const relsDoc = zip.files[relsPath] ? new DOMParser().parseFromString(await zip.files[relsPath].async("text"), "text/xml") : null;
-        const relsMap = {};
-        let layoutPath = null;
-        if (relsDoc) {
-          const relEls = relsDoc.getElementsByTagName("Relationship");
-          for (const rel of relEls) {
-            const id = rel.getAttribute("Id");
-            const target = rel.getAttribute("Target");
-            if (id && target) relsMap[id] = target.startsWith("../") ? target.replace("../", "ppt/") : "ppt/" + target;
-            const type = rel.getAttribute("Type");
-            if (type && type.includes("slideLayout") && target) layoutPath = target.startsWith("../") ? target.replace("../", "ppt/") : "ppt/" + target;
-          }
-        }
-
-        let extraBg = "";
-        if (layoutPath && zip.files[layoutPath]) {
-          try {
-            const lxml = await zip.files[layoutPath].async("text");
-            const ldoc = new DOMParser().parseFromString(lxml, "text/xml");
-            const lCSld = ldoc.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0] || child(ldoc.documentElement, "cSld");
-            if (lCSld) {
-              const lNum = layoutPath.match(/slideLayout(\d+)\.xml$/);
-              if (lNum) {
-                const lRelsPath = `ppt/slideLayouts/_rels/slideLayout${lNum[1]}.xml.rels`;
-                const lRelsDoc = zip.files[lRelsPath] ? new DOMParser().parseFromString(await zip.files[lRelsPath].async("text"), "text/xml") : null;
-                const lRelsMap = {};
-                if (lRelsDoc) {
-                  for (const r of lRelsDoc.getElementsByTagName("Relationship")) {
-                    const id = r.getAttribute("Id");
-                    const target = r.getAttribute("Target");
-                    if (id && target) lRelsMap[id] = target.startsWith("../") ? target.replace("../", "ppt/") : "ppt/" + target;
-                  }
-                }
-                extraBg = bgHtml(lCSld, lRelsMap, mediaUrls);
-              }
-            }
-          } catch {}
-        }
-
-        const xml = await zip.files[slidePath].async("text");
-        const doc = new DOMParser().parseFromString(xml, "text/xml");
-        const cSld = doc.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0] || child(doc.documentElement, "cSld") || doc.querySelector("cSld");
-        if (!cSld) continue;
-
-        stripHiddenFlags(cSld);
-
-        const slideHtml = extraBg + buildSlideHtml(cSld, slideWEmu, slideHEmu, cssW, cssH, relsMap, mediaUrls);
-        await captureHtml(pdfDoc, slideHtml, pw, ph);
-      } catch (err) {
-        console.warn("Skipped slide:", slidePath, err.message);
-      }
+    for (let i = 0; i < renderer.slideCount; i++) {
+      const canvas = document.createElement("canvas");
+      const rw = Math.round(cssW * CAPTURE_SCALE);
+      await renderer.renderSlide(i, canvas, rw);
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
+      const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+      const page = pdfDoc.addPage([pw, ph]);
+      page.drawImage(img, { x: 0, y: 0, width: pw, height: ph });
     }
-  } catch (err) {
-    throw new Error(`PPTX conversion error: ${err.message}`);
+  } finally {
+    renderer.destroy();
   }
 }
 
