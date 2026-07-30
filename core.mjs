@@ -318,12 +318,13 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
     595.28, 841.89);
 }
 
-function child(el, tag) { for (const c of el.children) if (c.localName === tag) return c; return null; }
-function children(el, tag) { return Array.from(el.children).filter((c) => c.localName === tag); }
+function child(el, tag) { if (!el) return null; for (const c of el.children) if (c.localName === tag) return c; return null; }
+function children(el, tag) { if (!el) return []; return Array.from(el.children).filter((c) => c.localName === tag); }
 
 function emuPx(emu, slideDim, containerDim) { return (emu / slideDim) * containerDim; }
 
 function parseColor(el) {
+  if (!el) return null;
   const srgb = child(el, "srgbClr");
   return srgb ? "#" + srgb.getAttribute("val") : null;
 }
@@ -376,6 +377,7 @@ function buildTextHtml(txBody) {
 }
 
 function getXfrm(spPr) {
+  if (!spPr) return null;
   const xfrm = child(spPr, "xfrm");
   if (!xfrm) return null;
   const off = child(xfrm, "off");
@@ -488,7 +490,9 @@ function buildSlideHtml(cSld, slideW, slideH, containerW, containerH, relsMap, m
   if (spTree) {
     for (const el of spTree.children) {
       if (el.localName === "grpSp") {
-        const grpXfrm = getXfrm(child(el, "grpSpPr"));
+        const grpSpPr = child(el, "grpSpPr");
+        if (!grpSpPr) continue;
+        const grpXfrm = getXfrm(grpSpPr);
         if (!grpXfrm) continue;
         for (const gc of el.children) posDiv(gc, grpXfrm.x, grpXfrm.y);
       } else {
