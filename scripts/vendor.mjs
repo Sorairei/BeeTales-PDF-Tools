@@ -7,6 +7,7 @@ const files = [
   ["node_modules/mammoth/mammoth.browser.min.js", "vendor/mammoth/mammoth.browser.min.js"],
   ["node_modules/xlsx/xlsx.mjs", "vendor/xlsx/xlsx.mjs"],
   ["node_modules/jszip/dist/jszip.min.js", "vendor/jszip/jszip.min.js"],
+  ["node_modules/html2canvas/dist/html2canvas.esm.js", "vendor/html2canvas/html2canvas.esm.js"],
 ];
 
 for (const [source, destination] of files) {
