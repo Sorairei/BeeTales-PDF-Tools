@@ -205,7 +205,7 @@ function wrapAndDraw(pdfDoc, font, paragraphs, title, baseSize) {
 
   for (const block of paragraphs) {
     const size = block.bold ? baseSize + 3 : baseSize;
-    const prefix = block.prefix || "";
+    let prefix = block.prefix || "";
     const indent = block.indent || 0;
     const words = block.text.split(" ");
     let current = "";
