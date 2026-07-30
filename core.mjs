@@ -245,20 +245,26 @@ function getRenderContainer(cssWidth) {
   if (!el) {
     el = document.createElement("div");
     el.id = "ofc-render";
-    el.style.cssText = `position:fixed;top:0;left:-9999px;overflow:hidden;background:#fff;z-index:-1;box-sizing:border-box`;
+    el.style.cssText = `position:fixed;top:0;left:-9999px;background:#fff;z-index:-1;box-sizing:border-box`;
     document.body.append(el);
   }
   el.style.width = cssPx(cssWidth);
-  el.style.height = "";
-  el.style.overflow = "";
   el.innerHTML = "";
   return el;
 }
 
-async function settle() {
+async function settle(el) {
   await document.fonts.ready;
+  const imgs = el ? Array.from(el.querySelectorAll("img")) : [];
+  if (imgs.length) {
+    await Promise.all(imgs.map((img) => {
+      if (img.complete && img.naturalWidth > 0) return;
+      return new Promise((r) => { img.onload = r; img.onerror = r; });
+    }));
+  }
   await new Promise((r) => requestAnimationFrame(r));
-  await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => requestAnimationFrame(r));
+  await new Promise((r) => setTimeout(r, 30));
 }
 
 async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt) {
@@ -266,13 +272,15 @@ async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt) {
   const cssH = ptToCss(pageHeightPt);
   const el = getRenderContainer(cssW);
   el.innerHTML = html;
-  await settle();
+  await settle(el);
 
   const full = await html2canvas(el, {
     scale: CAPTURE_SCALE,
     useCORS: true,
     backgroundColor: "#ffffff",
     logging: false,
+    width: Math.round(cssW),
+    height: Math.round(el.scrollHeight || cssH),
   });
 
   const pageH = Math.round(cssH * CAPTURE_SCALE);
