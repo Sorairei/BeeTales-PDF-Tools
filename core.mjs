@@ -189,16 +189,21 @@ export async function stampPdf(bytes, options) {
   return document.save();
 }
 
-const PAGE_W = 595.28;
-const PAGE_H = 841.89;
+const A4_PT_W = 595.28;
+const A4_PT_H = 841.89;
 const CAPTURE_SCALE = 2;
+const A4_CSS_W = 210 / 25.4 * 96;
+const A4_CSS_H = 297 / 25.4 * 96;
+const CSS2PT = A4_PT_W / A4_CSS_W;
+
+function cssPx(value) { return `${value}px`; }
 
 function getRenderContainer() {
   let el = document.getElementById("ofc-render");
   if (!el) {
     el = document.createElement("div");
     el.id = "ofc-render";
-    el.style.cssText = "position:fixed;top:0;left:-9999px;width:595.28px;overflow:visible;background:#fff;z-index:-1";
+    el.style.cssText = `position:fixed;top:0;left:-9999px;width:${cssPx(A4_CSS_W)};overflow:visible;background:#fff;z-index:-1;box-sizing:border-box`;
     document.body.append(el);
   }
   el.innerHTML = "";
@@ -223,8 +228,8 @@ async function captureHtml(pdfDoc, html) {
     logging: false,
   });
 
-  const pageH = Math.round(PAGE_H * CAPTURE_SCALE);
-  const pageW = Math.round(PAGE_W * CAPTURE_SCALE);
+  const pageH = Math.round(A4_CSS_H * CAPTURE_SCALE);
+  const pageW = Math.round(A4_CSS_W * CAPTURE_SCALE);
   const totalH = full.height;
   const count = Math.ceil(totalH / pageH);
 
@@ -240,9 +245,10 @@ async function captureHtml(pdfDoc, html) {
     const blob = await new Promise((r) => chunk.toBlob(r, "image/jpeg", 0.92));
     const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
 
-    const pdfPage = pdfDoc.addPage([PAGE_W, PAGE_H]);
-    const drawH = srcH / CAPTURE_SCALE;
-    pdfPage.drawImage(img, { x: 0, y: PAGE_H - drawH, width: PAGE_W, height: drawH });
+    const pdfPage = pdfDoc.addPage([A4_PT_W, A4_PT_H]);
+    const drawCSS = srcH / CAPTURE_SCALE;
+    const drawPT = drawCSS * CSS2PT;
+    pdfPage.drawImage(img, { x: 0, y: A4_PT_H - drawPT, width: A4_PT_W, height: drawPT });
   }
 
   el.innerHTML = "";
@@ -254,7 +260,7 @@ export async function convertDocxToPdfPages(arrayBuffer, pdfDoc) {
   const result = await mammothLib.convertToHtml({ arrayBuffer });
   const html = (result.value || "").trim();
   if (!html) throw new Error("The document appears to be empty or contains no extractable text.");
-  await captureHtml(pdfDoc, `<div style="font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:12pt;line-height:1.35;color:#000;padding:44px">${html}</div>`);
+  await captureHtml(pdfDoc, `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:12pt;line-height:1.35;color:#000;padding:72px">${html}</div>`);
 }
 
 export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
@@ -265,7 +271,7 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
   const sheet = workbook.Sheets[sheetName];
   const html = XLSX.utils.sheet_to_html(sheet, { editable: false });
   if (!html) throw new Error("The spreadsheet contains no data.");
-  await captureHtml(pdfDoc, `<div style="font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:10pt;color:#000;padding:30px">${html}</div>`);
+  await captureHtml(pdfDoc, `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:10pt;color:#000;padding:54px">${html}</div>`);
 }
 
 export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
@@ -289,7 +295,7 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
     const slideHtml = texts
       .map((t) => `<p style="margin:0 0 8px 0;font-size:${t === texts[0] ? "20pt" : "14pt"};font-weight:${t === texts[0] ? "700" : "400"}">${t}</p>`)
       .join("");
-    await captureHtml(pdfDoc, `<div style="font-family:Calibri,Segoe UI,Roboto,sans-serif;color:#000;padding:52px 44px">${slideHtml}</div>`);
+    await captureHtml(pdfDoc, `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;color:#000;padding:72px">${slideHtml}</div>`);
   }
 }
 
