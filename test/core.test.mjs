@@ -190,3 +190,30 @@ test("convertDocxNative creates pure vector PDF from document XML", async () => 
   const pdfBytes = await pdfDoc.save();
   assert.ok(pdfBytes.length > 0, "PDF bytes should be successfully generated");
 });
+
+test("convertDocxNative renders 2-column document without overflowing to extra pages", async () => {
+  const { convertDocxNative } = await import("../docx-engine.mjs");
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+
+  const docXml = `
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:sectPr>
+          <w:cols w:num="2" w:space="720"/>
+        </w:sectPr>
+        <w:p><w:r><w:t>Nombre del Interprete: Carlos Noe</w:t></w:r></w:p>
+        <w:p><w:r><w:t>Genero: Bolero Ranchero</w:t></w:r></w:p>
+        <w:p><w:r><w:br w:type="column"/></w:r></w:p>
+        <w:p><w:r><w:t>Ese beso es el culpable</w:t></w:r></w:p>
+      </w:body>
+    </w:document>
+  `;
+  zip.file("word/document.xml", docXml);
+  const docxBytes = await zip.generateAsync({ type: "arraybuffer" });
+
+  const pdfDoc = await PDFDocument.create();
+  await convertDocxNative(docxBytes, pdfDoc, "a4", 36);
+  assert.equal(pdfDoc.getPageCount(), 1, "2-column layout with column break should stay on 1 single page");
+});
+

@@ -308,6 +308,8 @@ export class DocxParser {
     // Page layout
     let pageSize = { width: PAPER_SIZES.a4.width, height: PAPER_SIZES.a4.height };
     let margins = { top: 56.7, right: 42.5, bottom: 56.7, left: 85.05 };
+    let numCols = 1;
+    let colSpace = 18;
 
     const szTag = xml.match(/<[^>]*pgSz[^>]*\/?>/i);
     if (szTag) {
@@ -324,6 +326,13 @@ export class DocxParser {
       if (t && r && b && l) {
         margins = { top: twipsToPt(t[1]), right: twipsToPt(r[1]), bottom: twipsToPt(b[1]), left: twipsToPt(l[1]) };
       }
+    }
+    const colsTag = xml.match(/<w:cols\b([^/]*)\/?>/i);
+    if (colsTag) {
+      const n = colsTag[1].match(/w:num="(\d+)"/i);
+      const s = colsTag[1].match(/w:space="(\d+)"/i);
+      if (n) numCols = parseInt(n[1], 10);
+      if (s) colSpace = twipsToPt(s[1]);
     }
 
     const bodyMatch = xml.match(/<w:body>([\s\S]*?)<\/w:body>/);
@@ -347,7 +356,7 @@ export class DocxParser {
       }
     }
 
-    return { pageSize, margins, elements, numbering, styleResolver };
+    return { pageSize, margins, numCols, colSpace, elements, numbering, styleResolver };
   }
 
   _parseParagraph(pXml, styleResolver, numbering, relsMap, zip) {
@@ -357,6 +366,22 @@ export class DocxParser {
 
     const props = styleResolver.resolveParagraphProps(styleId, pPr);
     const pageBreak = /<w:pageBreakBefore\/>|<w:pageBreakBefore\s+w:val="1"|<w:br\s+w:type="page"/i.test(pXml);
+    const columnBreak = /<w:br\s+w:type="column"/i.test(pXml);
+
+    // Section break columns change
+    const sectPrMatch = pXml.match(/<w:sectPr\b([\s\S]*?)<\/w:sectPr>/i);
+    let sectionCols = null;
+    if (sectPrMatch) {
+      const sCols = sectPrMatch[1].match(/<w:cols\b([^/]*)\/?>/i);
+      if (sCols) {
+        const sn = sCols[1].match(/w:num="(\d+)"/i);
+        const ss = sCols[1].match(/w:space="(\d+)"/i);
+        sectionCols = {
+          num: sn ? parseInt(sn[1], 10) : 1,
+          space: ss ? twipsToPt(ss[1]) : 18,
+        };
+      }
+    }
 
     // List item check
     const numId = (pPr.match(/<w:numId\s+w:val="([^"]+)"/) || [])[1];
@@ -444,10 +469,15 @@ export class DocxParser {
       props,
       runs,
       pageBreak,
+      columnBreak,
+      sectionCols,
     };
   }
 
   _parseTable(tblXml, styleResolver, numbering, relsMap, zip) {
+    const tblPr = (tblXml.match(/<w:tblPr>([\s\S]*?)<\/w:tblPr>/) || [])[1] || "";
+    const hasTableBorders = !/<w:tblBorders>[\s\S]*?<w:(top|bottom|left|right|insideH|insideV)\s+w:val="(none|nil)"/i.test(tblPr);
+
     const rows = [];
     const trRegex = /<w:tr\b[\s\S]*?<\/w:tr>/gi;
     let trMatch;
@@ -465,6 +495,8 @@ export class DocxParser {
         const widthPt = wMatch ? twipsToPt(wMatch[1]) : 100;
         const shdMatch = tcPr.match(/<w:shd\s+[^>]*w:fill="([^"]+)"/);
         const bgColor = shdMatch ? shdMatch[1] : null;
+        const tcBorders = tcPr.match(/<w:tcBorders>([\s\S]*?)<\/w:tcBorders>/);
+        const hasCellBorders = tcBorders ? !/<w:(top|bottom|left|right)\s+w:val="(none|nil)"/i.test(tcBorders[1]) : hasTableBorders;
 
         // Parse paragraphs inside cell
         const paragraphs = [];
@@ -478,6 +510,7 @@ export class DocxParser {
         cells.push({
           widthPt,
           bgColor,
+          hasBorders: hasCellBorders,
           paragraphs,
         });
       }
@@ -487,6 +520,7 @@ export class DocxParser {
 
     return {
       type: "table",
+      hasBorders: hasTableBorders,
       rows,
     };
   }
@@ -512,14 +546,33 @@ export class DocxRenderer {
     this.rightMargin = marginPt != null && marginPt >= 0 ? marginPt : parsedDoc.margins.right;
 
     this.printableWidth = Math.max(50, this.pw - this.leftMargin - this.rightMargin);
+    this.numCols = parsedDoc.numCols || 1;
+    this.colSpace = parsedDoc.colSpace || 18;
+    this.currentCol = 0;
+    this._recalcColumns();
+
     this.currentPage = null;
     this.currentY = 0;
   }
 
+  _recalcColumns() {
+    this.colWidth = (this.printableWidth - (this.numCols - 1) * this.colSpace) / this.numCols;
+  }
+
   _newPage() {
+    this.currentCol = 0;
     this.currentPage = this.pdfDoc.addPage([this.pw, this.ph]);
     this.currentY = this.ph - this.topMargin;
     return this.currentPage;
+  }
+
+  _advanceColumnOrPage() {
+    if (this.currentCol + 1 < this.numCols) {
+      this.currentCol++;
+      this.currentY = this.ph - this.topMargin;
+    } else {
+      this._newPage();
+    }
   }
 
   async render() {
@@ -537,17 +590,28 @@ export class DocxRenderer {
   }
 
   async _renderParagraph(p) {
-    if (p.pageBreak) {
-      this._newPage();
+    if (p.sectionCols) {
+      this.numCols = p.sectionCols.num;
+      this.colSpace = p.sectionCols.space;
+      this._recalcColumns();
+      this.currentCol = 0;
+      this.currentY = this.ph - this.topMargin;
     }
 
-    const { jc = "left", spaceBefore = 0, spaceAfter = 6, lineSpacing = 1.15, leftInd = 0, rightInd = 0, firstLineInd = 0, hangingInd = 0 } = p.props;
+    if (p.pageBreak) {
+      this._newPage();
+    } else if (p.columnBreak) {
+      this._advanceColumnOrPage();
+    }
+
+    const { jc = "left", spaceBefore = 0, spaceAfter = 3, lineSpacing = 1.15, leftInd = 0, rightInd = 0, firstLineInd = 0, hangingInd = 0 } = p.props;
 
     // Apply space before
     this.currentY -= spaceBefore;
 
-    const effLeft = this.leftMargin + leftInd;
-    const effWidth = Math.max(50, this.printableWidth - leftInd - rightInd);
+    const colX = this.leftMargin + this.currentCol * (this.colWidth + this.colSpace);
+    const effLeft = colX + leftInd;
+    const effWidth = Math.max(30, this.colWidth - leftInd - rightInd);
 
     // If paragraph has embedded images
     const imageRuns = p.runs.filter((r) => r.type === "image");
@@ -618,19 +682,19 @@ export class DocxRenderer {
     if (currentLine.length) lines.push(currentLine);
 
     const baseFontSize = p.runs[0] ? p.runs[0].fontSize : 11;
-    const lineHeight = baseFontSize * Math.max(1.1, lineSpacing);
+    const lineHeight = baseFontSize * Math.max(1.05, lineSpacing);
 
     if (!lines.length) {
-      // Empty line (blank paragraph)
+      // Empty line (blank paragraph between stanzas)
       this.currentY -= lineHeight;
-      if (this.currentY < this.bottomMargin) this._newPage();
+      if (this.currentY < this.bottomMargin) this._advanceColumnOrPage();
       return;
     }
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (this.currentY - lineHeight < this.bottomMargin) {
-        this._newPage();
+        this._advanceColumnOrPage();
       }
 
       let lineTotalW = 0;
@@ -667,13 +731,17 @@ export class DocxRenderer {
 
   async _renderTable(table) {
     for (const row of table.rows) {
+      // Proportional column scaling to fit printable width
+      const totalRawW = row.cells.reduce((sum, c) => sum + (c.widthPt || 100), 0);
+      const scale = totalRawW > 0 ? this.printableWidth / totalRawW : 1;
+
       // Calculate row height based on cell content
       let maxCellHeight = 24;
       for (const cell of row.cells) {
         let cellH = 10;
         for (const p of cell.paragraphs) {
           const fontSize = p.runs[0] ? p.runs[0].fontSize : 10;
-          cellH += (p.runs.length ? fontSize * 1.3 : 14) + 4;
+          cellH += (p.runs.length ? fontSize * 1.25 : 12) + 2;
         }
         if (cellH > maxCellHeight) maxCellHeight = cellH;
       }
@@ -684,7 +752,7 @@ export class DocxRenderer {
 
       let cellX = this.leftMargin;
       for (const cell of row.cells) {
-        const cellW = Math.min(this.printableWidth, cell.widthPt || 120);
+        const cellW = (cell.widthPt || 100) * scale;
 
         // Fill background if specified
         if (cell.bgColor && cell.bgColor !== "auto") {
@@ -697,30 +765,51 @@ export class DocxRenderer {
           });
         }
 
-        // Draw cell border
-        this.currentPage.drawRectangle({
-          x: cellX,
-          y: this.currentY - maxCellHeight,
-          width: cellW,
-          height: maxCellHeight,
-          borderWidth: 0.5,
-          borderColor: rgb(0.7, 0.7, 0.7),
-        });
+        // Draw cell border only if visible
+        if (cell.hasBorders) {
+          this.currentPage.drawRectangle({
+            x: cellX,
+            y: this.currentY - maxCellHeight,
+            width: cellW,
+            height: maxCellHeight,
+            borderWidth: 0.5,
+            borderColor: rgb(0.7, 0.7, 0.7),
+          });
+        }
 
         // Draw cell text
-        let innerY = this.currentY - 6;
+        let innerY = this.currentY - 4;
         for (const p of cell.paragraphs) {
-          for (const run of p.runs) {
+          const cellJc = p.props ? p.props.jc : "left";
+          const runs = p.runs || [];
+
+          let lineW = 0;
+          const wordList = [];
+          for (const run of runs) {
             const font = await getVectorFont(this.pdfDoc, run.fontFamily, run.isBold, run.isItalic);
-            this.currentPage.drawText(run.text, {
-              x: cellX + 4,
-              y: innerY - run.fontSize,
-              font,
-              size: run.fontSize,
-              color: parseColor(run.color),
-            });
+            lineW += font.widthOfTextAtSize(run.text, run.fontSize);
+            wordList.push({ text: run.text, font, fontSize: run.fontSize, color: parseColor(run.color) });
           }
-          innerY -= 14;
+
+          let drawStartX = cellX + 4;
+          if (cellJc === "center") {
+            drawStartX = cellX + Math.max(4, (cellW - lineW) / 2);
+          } else if (cellJc === "right") {
+            drawStartX = cellX + Math.max(4, cellW - lineW - 4);
+          }
+
+          let curX = drawStartX;
+          for (const item of wordList) {
+            this.currentPage.drawText(item.text, {
+              x: curX,
+              y: innerY - item.fontSize,
+              font: item.font,
+              size: item.fontSize,
+              color: item.color,
+            });
+            curX += item.font.widthOfTextAtSize(item.text, item.fontSize);
+          }
+          innerY -= (runs[0] ? runs[0].fontSize : 10) * 1.25 + 2;
         }
 
         cellX += cellW;
@@ -729,7 +818,7 @@ export class DocxRenderer {
       this.currentY -= maxCellHeight;
     }
 
-    this.currentY -= 8; // table bottom margin
+    this.currentY -= 6; // table bottom margin
   }
 }
 
