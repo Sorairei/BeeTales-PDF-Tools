@@ -211,8 +211,7 @@ export async function stampPdf(bytes, options) {
 
 const CAPTURE_SCALE = 2;
 const PT2CSS = 96 / 72;
-/** Standard 1-inch document margin in PDF points, applied on all sides when compositing HTML pages. */
-const MARGIN_PT = 72;
+
 
 function cssPx(value) { return `${value}px`; }
 
@@ -294,10 +293,10 @@ async function waitForCanvasContent(canvas, maxAttempts = 5) {
   }
 }
 
-async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt) {
+async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt, marginPt = 0) {
   const cssW = ptToCss(pageWidthPt);
   const cssH = ptToCss(pageHeightPt);
-  const marginCss = ptToCss(MARGIN_PT);
+  const marginCss = ptToCss(marginPt);
   // Render content at printable width (page minus left+right margins)
   const printableW = Math.max(1, cssW - 2 * marginCss);
   const printableH = Math.max(1, cssH - 2 * marginCss);
@@ -351,7 +350,7 @@ async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt) {
   }
 }
 
-export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "auto") {
+export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "auto", marginPt = 0) {
   resetRenderContainer();
   const mammothLib = globalThis.mammoth;
   if (!mammothLib) throw new Error("mammoth library is not available.");
@@ -371,10 +370,10 @@ export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "aut
   // Margins are applied by captureHtml — no padding needed in the wrapper
   await captureHtml(pdfDoc,
     `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:12pt;line-height:1.35;color:#000">${html}</div>`,
-    pw, ph);
+    pw, ph, marginPt);
 }
 
-export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, paperKey = "a4") {
+export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, paperKey = "a4", marginPt = 0) {
   resetRenderContainer();
   const data = new Uint8Array(arrayBuffer);
   const workbook = XLSX.read(data, { type: "array" });
@@ -387,7 +386,7 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, paperKey = "a4"
   // Margins are applied by captureHtml — no padding needed in the wrapper
   await captureHtml(pdfDoc,
     `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:10pt;color:#000">${html}</div>`,
-    paper.width, paper.height);
+    paper.width, paper.height, marginPt);
 }
 
 /** Sample multiple rows of canvas to detect content */
@@ -562,9 +561,9 @@ export async function buildMixedPdf(imageItems, paperKey = "image", marginPt = 2
         page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
       }
     } else if (ext === "docx") {
-      await convertDocxToPdfPages(await item.file.arrayBuffer(), output, paperKey);
+      await convertDocxToPdfPages(await item.file.arrayBuffer(), output, paperKey, marginPt);
     } else if (ext === "xlsx") {
-      await convertXlsxToPdfPages(await item.file.arrayBuffer(), output, paperKey);
+      await convertXlsxToPdfPages(await item.file.arrayBuffer(), output, paperKey, marginPt);
     } else if (ext === "pptx") {
       await convertPptxToPdfPages(await item.file.arrayBuffer(), output);
     }
