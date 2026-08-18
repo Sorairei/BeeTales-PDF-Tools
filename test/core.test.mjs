@@ -1,5 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import JSZip from "jszip";
+import fontkit from "@pdf-lib/fontkit";
+
+globalThis.JSZip = JSZip;
+globalThis.fontkit = fontkit;
+
 import { PDFDocument } from "../vendor/pdf-lib/pdf-lib.esm.min.js";
 import { buildPdfFromPages, calculateWatermarkPlacement, createSplitPdfs, fitImageWithinPage, moveItem, PAPER_SIZES, parseHexColor, parsePageSelection, signatureWidthForPage, stampPdf } from "../core.mjs";
 

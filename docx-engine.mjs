@@ -2,15 +2,10 @@ import { rgb } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
 import { getVectorFont } from "./font-manager.mjs";
 import { PAPER_SIZES } from "./core.mjs";
 
-async function getJSZip() {
+function getJSZip() {
   if (typeof globalThis !== "undefined" && globalThis.JSZip) return globalThis.JSZip;
   if (typeof window !== "undefined" && window.JSZip) return window.JSZip;
-  try {
-    const mod = await import("jszip");
-    return mod.default || mod;
-  } catch {
-    return globalThis.JSZip;
-  }
+  return null;
 }
 
 /** Convert twips (1/20 pt) to PDF points */

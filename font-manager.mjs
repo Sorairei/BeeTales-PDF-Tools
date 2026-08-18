@@ -1,14 +1,9 @@
 import { StandardFonts } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
 
-async function getFontkit() {
+function getFontkit() {
   if (typeof globalThis !== "undefined" && globalThis.fontkit) return globalThis.fontkit;
   if (typeof window !== "undefined" && window.fontkit) return window.fontkit;
-  try {
-    const mod = await import("@pdf-lib/fontkit");
-    return mod.default || mod;
-  } catch {
-    return globalThis.fontkit || null;
-  }
+  return null;
 }
 
 const FONT_MAP = {
