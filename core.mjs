@@ -241,6 +241,75 @@ async function detectDocxPageSize(arrayBuffer) {
   return null;
 }
 
+/**
+ * Read paragraph alignments directly from the DOCX XML, resolving paragraph-style
+ * inheritance. mammoth.js only picks up alignment from direct paragraph formatting
+ * (w:pPr > w:jc) and silently drops alignment that comes from a named paragraph style.
+ */
+async function extractDocxParagraphAlignments(arrayBuffer) {
+  try {
+    const JSZipLib = globalThis.JSZip;
+    if (!JSZipLib) return [];
+    const zip = await JSZipLib.loadAsync(arrayBuffer);
+
+    // Build styleId → justification map from word/styles.xml
+    const styleJcMap = {};
+    const stylesFile = zip.files["word/styles.xml"];
+    if (stylesFile) {
+      const sxml = await stylesFile.async("text");
+      for (const block of sxml.match(/<w:style\b[\s\S]*?<\/w:style>/gi) || []) {
+        const id = (block.match(/w:styleId="([^"]+)"/) || [])[1];
+        // Only look inside w:pPr to avoid matching w:jc used for East-Asian run properties
+        const pPrBlock = (block.match(/<w:pPr>([\s\S]*?)<\/w:pPr>/) || [])[1] || "";
+        const jc = (pPrBlock.match(/<w:jc\s+w:val="([^"]+)"/) || [])[1];
+        if (id && jc) styleJcMap[id] = jc;
+      }
+    }
+
+    // Extract per-paragraph alignment from the main document body only
+    const docFile = zip.files["word/document.xml"];
+    if (!docFile) return [];
+    const xml = await docFile.async("text");
+    // Limit scope to w:body so we skip paragraphs inside text-boxes, SDTs, etc.
+    const body = (xml.match(/<w:body>([\s\S]*?)<\/w:body>/) || [])[1] || xml;
+
+    const alignments = [];
+    for (const para of body.match(/<w:p[ >][\s\S]*?<\/w:p>/gi) || []) {
+      const pPr = (para.match(/<w:pPr>([\s\S]*?)<\/w:pPr>/) || [])[1] || "";
+      // Direct paragraph formatting takes precedence over style
+      const directJc = (pPr.match(/<w:jc\s+w:val="([^"]+)"/) || [])[1];
+      if (directJc) { alignments.push(directJc); continue; }
+      // Fall back to the paragraph's named style
+      const styleId = (pPr.match(/<w:pStyle\s+w:val="([^"]+)"/) || [])[1];
+      alignments.push((styleId && styleJcMap[styleId]) || "");
+    }
+    return alignments;
+  } catch (err) {
+    console.warn("[BeeTales] Paragraph alignment extraction failed:", err);
+    return [];
+  }
+}
+
+/**
+ * Inject text-align inline styles into mammoth's <p> elements using the
+ * alignment array produced by extractDocxParagraphAlignments.
+ */
+function injectParagraphAlignments(html, alignments) {
+  if (!alignments.length) return html;
+  const cssMap = { center: "center", right: "right", both: "justify", distribute: "justify" };
+  let idx = 0;
+  return html.replace(/<p(\s[^>]*)?>/gi, (match, attrs) => {
+    const cssAlign = cssMap[alignments[idx++] || ""];
+    if (!cssAlign) return match;
+    attrs = attrs || "";
+    const styleMatch = /\bstyle="([^"]*)"/i.exec(attrs);
+    if (styleMatch) {
+      return `<p${attrs.replace(/\bstyle="([^"]*)"/i, `style="${styleMatch[1]}text-align:${cssAlign};"`)}>`;
+    }
+    return `<p${attrs} style="text-align:${cssAlign};">`;
+  });
+}
+
 function getRenderContainer(cssWidth) {
   let el = document.getElementById("ofc-render");
   if (!el) {
@@ -370,9 +439,15 @@ export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "aut
     pw = detected ? detected.width : PAPER_SIZES.a4.width;
     ph = detected ? detected.height : PAPER_SIZES.a4.height;
   }
-  const result = await mammothLib.convertToHtml({ arrayBuffer });
-  const html = (result.value || "").trim();
-  if (!html) throw new Error("The document appears to be empty or contains no extractable text.");
+  // Extract paragraph alignments from DOCX XML before calling mammoth,
+  // since mammoth silently drops style-based alignment (center, right, justify).
+  const alignments = await extractDocxParagraphAlignments(arrayBuffer);
+  // ignoreEmptyParagraphs:false preserves blank lines between stanzas/sections.
+  const result = await mammothLib.convertToHtml({ arrayBuffer, ignoreEmptyParagraphs: false });
+  const rawHtml = (result.value || "").trim();
+  if (!rawHtml) throw new Error("The document appears to be empty or contains no extractable text.");
+  // Inject the correct text-align on each <p> that mammoth left without it.
+  const html = injectParagraphAlignments(rawHtml, alignments);
   // Word-faithful CSS: reset browser paragraph margins, match Word line/spacing defaults.
   // @font-face aliases let web fonts cover the case where MS fonts are not locally installed.
   const docxCss = [
