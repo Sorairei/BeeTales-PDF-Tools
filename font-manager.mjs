@@ -1,5 +1,15 @@
-import fontkit from "./vendor/fontkit/fontkit.es.min.js";
 import { StandardFonts } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
+
+async function getFontkit() {
+  if (typeof globalThis !== "undefined" && globalThis.fontkit) return globalThis.fontkit;
+  if (typeof window !== "undefined" && window.fontkit) return window.fontkit;
+  try {
+    const mod = await import("@pdf-lib/fontkit");
+    return mod.default || mod;
+  } catch {
+    return globalThis.fontkit || null;
+  }
+}
 
 const FONT_MAP = {
   // Calibri -> Carlito
@@ -89,7 +99,8 @@ export async function getVectorFont(pdfDoc, family = "calibri", isBold = false, 
 
   // Register fontkit on this document if not already registered
   try {
-    pdfDoc.registerFontkit(fontkit);
+    const fk = await getFontkit();
+    if (fk) pdfDoc.registerFontkit(fk);
   } catch {}
 
   const fileName = FONT_MAP[key] || FONT_MAP[`calibri_${weight}_${style}`];
