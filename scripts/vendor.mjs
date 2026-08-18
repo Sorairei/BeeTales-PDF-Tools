@@ -8,6 +8,7 @@ const files = [
   ["node_modules/xlsx/xlsx.mjs", "vendor/xlsx/xlsx.mjs"],
   ["node_modules/jszip/dist/jszip.min.js", "vendor/jszip/jszip.min.js"],
   ["node_modules/html2canvas/dist/html2canvas.esm.js", "vendor/html2canvas/html2canvas.esm.js"],
+  ["node_modules/@pdf-lib/fontkit/dist/fontkit.es.min.js", "vendor/fontkit/fontkit.es.min.js"],
   // pptx-browser: zero-dep Canvas-based PPTX renderer
 ];
 

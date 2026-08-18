@@ -1,0 +1,99 @@
+@font-face {
+  font-family: 'Carlito';
+  font-style: normal;
+  font-weight: 400;
+  src: url('./carlito-400-normal.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Carlito';
+  font-style: italic;
+  font-weight: 400;
+  src: url('./carlito-400-italic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Carlito';
+  font-style: normal;
+  font-weight: 700;
+  src: url('./carlito-700-normal.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Carlito';
+  font-style: italic;
+  font-weight: 700;
+  src: url('./carlito-700-italic.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Arimo';
+  font-style: normal;
+  font-weight: 400;
+  src: url('./arimo-400-normal.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Arimo';
+  font-style: italic;
+  font-weight: 400;
+  src: url('./arimo-400-italic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Arimo';
+  font-style: normal;
+  font-weight: 700;
+  src: url('./arimo-700-normal.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Arimo';
+  font-style: italic;
+  font-weight: 700;
+  src: url('./arimo-700-italic.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Tinos';
+  font-style: normal;
+  font-weight: 400;
+  src: url('./tinos-400-normal.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Tinos';
+  font-style: italic;
+  font-weight: 400;
+  src: url('./tinos-400-italic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Tinos';
+  font-style: normal;
+  font-weight: 700;
+  src: url('./tinos-700-normal.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Tinos';
+  font-style: italic;
+  font-weight: 700;
+  src: url('./tinos-700-italic.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cousine';
+  font-style: normal;
+  font-weight: 400;
+  src: url('./cousine-400-normal.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Cousine';
+  font-style: italic;
+  font-weight: 400;
+  src: url('./cousine-400-italic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Cousine';
+  font-style: normal;
+  font-weight: 700;
+  src: url('./cousine-700-normal.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Cousine';
+  font-style: italic;
+  font-weight: 700;
+  src: url('./cousine-700-italic.ttf') format('truetype');
+}

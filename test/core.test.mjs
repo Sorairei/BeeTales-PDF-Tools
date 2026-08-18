@@ -97,3 +97,21 @@ test("PAPER_SIZES contains required formats with correct PDF-point dimensions", 
   assert.ok(PAPER_SIZES.b5, "b5 must exist");
   assert.ok(PAPER_SIZES.tabloid, "tabloid must exist");
 });
+
+test("getVectorFont embeds metric-compatible TTF fonts with caching", async () => {
+  const { getVectorFont } = await import("../font-manager.mjs");
+  const doc = await PDFDocument.create();
+  const calibriRegular = await getVectorFont(doc, "calibri", false, false);
+  assert.ok(calibriRegular, "Calibri font should be embedded");
+  const calibriBold = await getVectorFont(doc, "calibri", true, false);
+  assert.ok(calibriBold, "Calibri Bold font should be embedded");
+
+  // Verify caching returns same instance for same doc and key
+  const cached = await getVectorFont(doc, "calibri", false, false);
+  assert.equal(cached, calibriRegular, "FontManager should return cached PDFFont");
+
+  const page = doc.addPage([400, 400]);
+  page.drawText("Test Vector Text", { x: 50, y: 350, font: calibriRegular, size: 14 });
+  const bytes = await doc.save();
+  assert.ok(bytes.length > 0, "PDF document with vector font should be generated");
+});

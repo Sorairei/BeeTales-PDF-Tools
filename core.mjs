@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, degrees, rgb } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
 import * as XLSX from "./vendor/xlsx/xlsx.mjs";
 import html2canvas from "./vendor/html2canvas/html2canvas.esm.js";
+import { getVectorFont } from "./font-manager.mjs";
 
 /** Standard paper sizes in PDF points (1 pt = 1/72 inch). */
 export const PAPER_SIZES = {
@@ -557,6 +558,175 @@ async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt, marginPt = 0
   }
 }
 
+
+
+/**
+ * Render structured document text directly as high-resolution vector PDF pages.
+ * Supports bold, italic, font sizes, alignment (center, right, left), indentation,
+ * margins, and automatic page splitting with font metrics.
+ */
+async function renderDocxVector(pdfDoc, html, pw, ph, marginPt) {
+  const topMargin = Math.max(20, marginPt || 36);
+  const bottomMargin = Math.max(20, marginPt || 36);
+  const leftMargin = Math.max(20, marginPt || 36);
+  const rightMargin = Math.max(20, marginPt || 36);
+  const printableWidth = pw - leftMargin - rightMargin;
+
+  // Pre-load regular, bold, and italic fonts
+  const fontRegular = await getVectorFont(pdfDoc, "calibri", false, false);
+  const fontBold = await getVectorFont(pdfDoc, "calibri", true, false);
+  const fontItalic = await getVectorFont(pdfDoc, "calibri", false, true);
+  const fontBoldItalic = await getVectorFont(pdfDoc, "calibri", true, true);
+
+  let currentPage = pdfDoc.addPage([pw, ph]);
+  let currentY = ph - topMargin;
+
+  // Split HTML into paragraph and heading blocks
+  const blockRegex = /<(p|h[1-6]|div)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi;
+  let match;
+  const blocks = [];
+  while ((match = blockRegex.exec(html)) !== null) {
+    const tag = match[1].toLowerCase();
+    const attrs = match[2] || "";
+    const innerHtml = match[3];
+    blocks.push({ tag, attrs, innerHtml });
+  }
+
+  if (!blocks.length) return false;
+
+  for (const block of blocks) {
+    // Check for explicit page break
+    if (block.attrs.includes("break-before:page") || block.innerHtml.includes("break-before:page")) {
+      currentPage = pdfDoc.addPage([pw, ph]);
+      currentY = ph - topMargin;
+    }
+
+    // Extract alignment
+    let align = "left";
+    if (/text-align:\s*center/i.test(block.attrs)) align = "center";
+    else if (/text-align:\s*right/i.test(block.attrs)) align = "right";
+
+    // Extract font size
+    let fontSize = 11;
+    if (block.tag === "h1") fontSize = 16;
+    else if (block.tag === "h2") fontSize = 14;
+    else if (block.tag === "h3") fontSize = 12;
+
+    const lineHeight = fontSize * 1.25;
+
+    // Extract margin-top / margin-bottom
+    const mtMatch = block.attrs.match(/margin-top:\s*([\d.]+)pt/i);
+    const mbMatch = block.attrs.match(/margin-bottom:\s*([\d.]+)pt/i);
+    const marginTop = mtMatch ? Number(mtMatch[1]) : 0;
+    const marginBottom = mbMatch ? Number(mbMatch[1]) : 6;
+
+    // Apply space before
+    currentY -= marginTop;
+
+    // Parse runs within this block
+    const runs = [];
+    const runRegex = /(<strong\b[^>]*>|<b\b[^>]*>|<em\b[^>]*>|<i\b[^>]*>|<\/strong>|<\/b>|<\/em>|<\/i>|[^<]+)/gi;
+    let runMatch;
+    let isBold = block.tag.startsWith("h");
+    let isItalic = false;
+
+    while ((runMatch = runRegex.exec(block.innerHtml)) !== null) {
+      const part = runMatch[1];
+      if (/^<(strong|b)\b/i.test(part)) isBold = true;
+      else if (/^<\/(strong|b)>/i.test(part)) isBold = block.tag.startsWith("h");
+      else if (/^<(em|i)\b/i.test(part)) isItalic = true;
+      else if (/^<\/(em|i)>/i.test(part)) isItalic = false;
+      else {
+        const text = part.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+        if (text) {
+          const font = isBold && isItalic ? fontBoldItalic
+            : isBold ? fontBold
+            : isItalic ? fontItalic
+            : fontRegular;
+          runs.push({ text, font, isBold, isItalic });
+        }
+      }
+    }
+
+    // Break runs into wrapped lines
+    const words = [];
+    for (const run of runs) {
+      const tokens = run.text.split(/(\s+)/);
+      for (const token of tokens) {
+        if (!token) continue;
+        words.push({ text: token, font: run.font, isSpace: /^\s+$/.test(token) });
+      }
+    }
+
+    const lines = [];
+    let currentLine = [];
+    let currentLineWidth = 0;
+
+    for (const word of words) {
+      const wordWidth = word.font.widthOfTextAtSize(word.text, fontSize);
+      if (currentLineWidth + wordWidth > printableWidth && currentLine.length > 0 && !word.isSpace) {
+        lines.push(currentLine);
+        currentLine = [];
+        currentLineWidth = 0;
+      }
+      if (currentLine.length === 0 && word.isSpace) continue; // skip leading space
+      currentLine.push(word);
+      currentLineWidth += wordWidth;
+    }
+    if (currentLine.length) lines.push(currentLine);
+
+    // If paragraph is empty (blank line), reserve vertical space
+    if (!lines.length) {
+      currentY -= lineHeight;
+      if (currentY < bottomMargin) {
+        currentPage = pdfDoc.addPage([pw, ph]);
+        currentY = ph - topMargin;
+      }
+      continue;
+    }
+
+    // Render lines onto page
+    for (const line of lines) {
+      if (currentY - lineHeight < bottomMargin) {
+        currentPage = pdfDoc.addPage([pw, ph]);
+        currentY = ph - topMargin;
+      }
+
+      // Calculate line total width for alignment
+      let lineTotalWidth = 0;
+      for (const word of line) {
+        lineTotalWidth += word.font.widthOfTextAtSize(word.text, fontSize);
+      }
+
+      let startX = leftMargin;
+      if (align === "center") {
+        startX = leftMargin + Math.max(0, (printableWidth - lineTotalWidth) / 2);
+      } else if (align === "right") {
+        startX = leftMargin + Math.max(0, printableWidth - lineTotalWidth);
+      }
+
+      let curX = startX;
+      for (const word of line) {
+        currentPage.drawText(word.text, {
+          x: curX,
+          y: currentY - fontSize,
+          font: word.font,
+          size: fontSize,
+          color: rgb(0, 0, 0),
+        });
+        curX += word.font.widthOfTextAtSize(word.text, fontSize);
+      }
+
+      currentY -= lineHeight;
+    }
+
+    // Apply space after
+    currentY -= marginBottom;
+  }
+
+  return true;
+}
+
 export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "auto", marginPt = 0) {
   resetRenderContainer();
   const mammothLib = globalThis.mammoth;
@@ -597,7 +767,18 @@ export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "aut
   // ── 4. Inject paragraph styles extracted from the DOCX XML ────────────────
   const html = injectParagraphStyles(rawHtml, props);
 
-  // ── 5. Build CSS reset (Word defaults + font aliases + table/list rules) ──
+  // ── 5. Try vector rendering for pure text; fallback to captureHtml for tables/images
+  const hasTablesOrImages = /<table\b|<img\b/i.test(html);
+  if (!hasTablesOrImages) {
+    try {
+      const ok = await renderDocxVector(pdfDoc, html, pw, ph, docMarginPt);
+      if (ok) return;
+    } catch (err) {
+      console.warn("[BeeTales] Vector render fallback to HTML capture:", err);
+    }
+  }
+
+  // ── 6. Build CSS reset (Word defaults + font aliases + table/list rules) ──
   const docxCss = [
     // Font aliases: local MS font → web-font substitute when MS font not installed
     "@font-face{font-family:'Calibri';src:local('Calibri'),local('carlito regular'),local('Carlito');font-weight:400;font-style:normal}",

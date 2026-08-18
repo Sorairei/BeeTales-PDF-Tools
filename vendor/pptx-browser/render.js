@@ -596,14 +596,14 @@ export async function renderTextBody(ctx, txBody, bx, by, bw, bh, scale, themeCo
     const marL = attrInt(pPr, 'marL', 0) * scale;
     const indent = attrInt(pPr, 'indent', 0) * scale;
 
-    // Spacing / defaults (must be before parseBullet — defRPr is used in the call)
+    // ── Bullet / list marker ─────────────────────────────────────────────────
+    const bullet = pPr ? parseBullet(pPr, defRPr, themeColors, themeData) : null;
+
+    // Spacing
     const spcBef = g1(pPr, 'spcBef');
     const spcAft = g1(pPr, 'spcAft');
     const lnSpc = g1(pPr, 'lnSpc');
     const defRPr = g1(pPr, 'defRPr');
-
-    // ── Bullet / list marker ─────────────────────────────────────────────────
-    const bullet = pPr ? parseBullet(pPr, defRPr, themeColors, themeData) : null;
 
     // Default font size: lstStyle (lowest) → pPr defRPr (higher) → run rPr (highest)
     let paraDefSz = defaultFontSz;
@@ -1845,16 +1845,6 @@ export function buildPlaceholderMap(docs) {
 }
 
 // Look up placeholder position for a slide shape that has no xfrm
-const DEFAULT_PLACEHOLDER_EMU = {
-  title:   { x: 457200,  y: 457200,  w: 11277600, h: 1371600 },
-  ctrTitle:{ x: 1371600, y: 1371600, w: 9448800,  h: 1828800 },
-  subTitle:{ x: 1371600, y: 3657600, w: 9448800,  h: 914400  },
-  body:    { x: 457200,  y: 2286000, w: 11277600, h: 4114800 },
-  dt:      { x: 457200,  y: 6400800, w: 2743200,  h: 457200  },
-  ft:      { x: 4572000, y: 6400800, w: 3048000,  h: 457200  },
-  sldNum:  { x: 9601200, y: 6400800, w: 1219200,  h: 457200  },
-};
-
 export function resolvePlaceholderXfrm(spEl, placeholderMap) {
   if (!placeholderMap) return null;
   const nvSpPr = g1(spEl, 'nvSpPr');
@@ -1864,18 +1854,10 @@ export function resolvePlaceholderXfrm(spEl, placeholderMap) {
   const phType = attr(ph, 'type', 'body');
   const phIdx = attr(ph, 'idx', '0');
   // Try exact key, then idx-only, then type-only
-  const result = placeholderMap[`${phType}:${phIdx}`]
+  return placeholderMap[`${phType}:${phIdx}`]
       || placeholderMap[`${phType}:0`]
       || placeholderMap[`body:${phIdx}`]
       || null;
-  // Fallback: provide sensible default positions for common placeholder types
-  if (!result) {
-    const def = DEFAULT_PLACEHOLDER_EMU[phType];
-    if (def) return { x: def.x, y: def.y, w: def.w, h: def.h, txBody: null };
-    // Generic fallback for unknown types
-    return { x: 457200, y: 457200, w: 11277600, h: 5943600, txBody: null };
-  }
-  return result;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
