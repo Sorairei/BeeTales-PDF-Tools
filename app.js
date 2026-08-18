@@ -364,7 +364,7 @@ async function processFiles() {
     if (mode === "organize") {
       const bytes = await buildPdfFromPages(sources, pageItems); addResult(bytes, safePdfName(sources[0].file.name, sources.length > 1 ? "merged" : "organized"), `${pageItems.length} pages`);
     } else if (mode === "images") {
-      const bytes = await buildMixedPdf(imageItems); addResult(bytes, "beetales-document.pdf", `${imageItems.length} files`);
+      const paperKey = elements.pageSize.value || "image"; const margin = Number(elements.imageMargin.value) || 0; const bytes = await buildMixedPdf(imageItems, paperKey, margin); const firstName = imageItems[0].file.name.replace(/\.[^.]+$/, ""); const mixedName = imageItems.length === 1 ? `${firstName}.pdf` : `${firstName}-merged.pdf`; addResult(bytes, mixedName, `${imageItems.length} files`);
     } else if (mode === "extract") {
       const action = activeValue("extract-action"); const chosen = parsePageSelection(elements.pageSelection.value, pageItems.length);
       if (action === "split") { const outputs = await createSplitPdfs(sources[0].document, chosen); outputs.forEach((bytes, i) => addResult(bytes, safePdfName(sources[0].file.name, `page-${chosen[i] + 1}`), "1 page")); elements.resultsTitle.textContent = `${outputs.length} PDFs are ready`; }

@@ -2,6 +2,26 @@ import { PDFDocument, StandardFonts, degrees, rgb } from "./vendor/pdf-lib/pdf-l
 import * as XLSX from "./vendor/xlsx/xlsx.mjs";
 import html2canvas from "./vendor/html2canvas/html2canvas.esm.js";
 
+/** Standard paper sizes in PDF points (1 pt = 1/72 inch). */
+export const PAPER_SIZES = {
+  a4:        { width: 595.28,  height: 841.89,  label: "A4" },
+  letter:    { width: 612,     height: 792,     label: "Letter" },
+  legal:     { width: 612,     height: 1008,    label: "Oficio / Legal" },
+  a3:        { width: 841.89,  height: 1190.55, label: "A3" },
+  a5:        { width: 419.53,  height: 595.28,  label: "A5" },
+  executive: { width: 521.86,  height: 756,     label: "Executive" },
+  b5:        { width: 498.9,   height: 708.66,  label: "B5" },
+  tabloid:   { width: 792,     height: 1224,    label: "Tabloid / Ledger" },
+};
+
+/** Remove dangerous tags and event-handler attributes from HTML before rendering. */
+function sanitizeHtml(html) {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script\s*>/gi, "")
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style\s*>/gi, "")
+    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, "");
+}
+
 export function parsePageSelection(input, pageCount) {
   const value = String(input || "").trim();
   if (!value) throw new Error("Enter at least one page number.");
@@ -191,6 +211,8 @@ export async function stampPdf(bytes, options) {
 
 const CAPTURE_SCALE = 2;
 const PT2CSS = 96 / 72;
+/** Standard 1-inch document margin in PDF points, applied on all sides when compositing HTML pages. */
+const MARGIN_PT = 72;
 
 function cssPx(value) { return `${value}px`; }
 
@@ -214,7 +236,9 @@ async function detectDocxPageSize(arrayBuffer) {
         if (width > 0 && height > 0) return { width, height };
       }
     }
-  } catch {}
+  } catch (err) {
+    console.warn("[BeeTales] DOCX page size detection failed:", err);
+  }
   return null;
 }
 
@@ -223,7 +247,7 @@ function getRenderContainer(cssWidth) {
   if (!el) {
     el = document.createElement("div");
     el.id = "ofc-render";
-    el.style.cssText = `position:fixed;top:0;left:0;z-index:-9999;opacity:1;background:#fff;box-sizing:border-box`;
+    el.style.cssText = `position:fixed;top:-99999px;left:0;background:#fff;box-sizing:border-box`;
     document.body.append(el);
   }
   el.style.width = cssPx(cssWidth);
@@ -273,61 +297,84 @@ async function waitForCanvasContent(canvas, maxAttempts = 5) {
 async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt) {
   const cssW = ptToCss(pageWidthPt);
   const cssH = ptToCss(pageHeightPt);
-  const el = getRenderContainer(cssW);
-  el.innerHTML = html;
+  const marginCss = ptToCss(MARGIN_PT);
+  // Render content at printable width (page minus left+right margins)
+  const printableW = Math.max(1, cssW - 2 * marginCss);
+  const printableH = Math.max(1, cssH - 2 * marginCss);
+
+  const el = getRenderContainer(printableW);
+  el.innerHTML = sanitizeHtml(html);
   await settle(el);
+  // Second rAF pass guards against browsers that return scrollHeight=0 on off-screen elements
+  await new Promise((r) => requestAnimationFrame(r));
+  const contentH = Math.max(printableH, el.scrollHeight);
 
   const full = await html2canvas(el, {
     scale: CAPTURE_SCALE,
     useCORS: true,
     backgroundColor: "#ffffff",
     logging: false,
-    width: Math.round(cssW),
-    height: Math.round(el.scrollHeight || cssH),
+    width: Math.round(printableW),
+    height: Math.round(contentH),
   });
 
-  const pageH = Math.round(cssH * CAPTURE_SCALE);
-  const pageW = Math.round(cssW * CAPTURE_SCALE);
+  // Page dimensions in canvas pixels
+  const printableHPx = Math.round(printableH * CAPTURE_SCALE);
+  const pageWPx = Math.round(cssW * CAPTURE_SCALE);
+  const pageHPx = Math.round(cssH * CAPTURE_SCALE);
+  const marginPx = Math.round(marginCss * CAPTURE_SCALE);
   const totalH = full.height;
-  const count = Math.ceil(totalH / pageH);
+  const count = Math.ceil(totalH / printableHPx);
 
-  for (let i = 0; i < count; i++) {
-    const srcY = i * pageH;
-    const srcH = Math.min(pageH, totalH - srcY);
-    const chunk = document.createElement("canvas");
-    chunk.width = pageW;
-    chunk.height = srcH;
-    const ctx = chunk.getContext("2d");
-    ctx.drawImage(full, 0, srcY, pageW, srcH, 0, 0, pageW, srcH);
+  try {
+    for (let i = 0; i < count; i++) {
+      const srcY = i * printableHPx;
+      const srcH = Math.min(printableHPx, totalH - srcY);
 
-    const blob = await new Promise((r) => chunk.toBlob(r, "image/jpeg", 0.92));
-    const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+      // Compose a full-page canvas: white background + content inset by the margin on all sides
+      const chunk = document.createElement("canvas");
+      chunk.width = pageWPx;
+      chunk.height = pageHPx;
+      const ctx = chunk.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pageWPx, pageHPx);
+      // Content starts at (marginPx, marginPx) — this gives correct top margin on every page
+      ctx.drawImage(full, 0, srcY, full.width, srcH, marginPx, marginPx, full.width, srcH);
 
-    const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
-    const drawCSS = srcH / CAPTURE_SCALE;
-    const drawPt = drawCSS / PT2CSS;
-    pdfPage.drawImage(img, { x: 0, y: pageHeightPt - drawPt, width: pageWidthPt, height: drawPt });
+      const blob = await new Promise((r) => chunk.toBlob(r, "image/jpeg", 0.92));
+      const img = await pdfDoc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+      const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+      pdfPage.drawImage(img, { x: 0, y: 0, width: pageWidthPt, height: pageHeightPt });
+    }
+  } finally {
+    el.innerHTML = "";
   }
-
-  el.innerHTML = "";
 }
 
-export async function convertDocxToPdfPages(arrayBuffer, pdfDoc) {
+export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "auto") {
   resetRenderContainer();
   const mammothLib = globalThis.mammoth;
   if (!mammothLib) throw new Error("mammoth library is not available.");
-  const size = await detectDocxPageSize(arrayBuffer);
-  const pw = size ? size.width : 595.28;
-  const ph = size ? size.height : 841.89;
+  const forcedPaper = PAPER_SIZES[paperKey];
+  let pw, ph;
+  if (forcedPaper) {
+    pw = forcedPaper.width;
+    ph = forcedPaper.height;
+  } else {
+    const detected = await detectDocxPageSize(arrayBuffer);
+    pw = detected ? detected.width : PAPER_SIZES.a4.width;
+    ph = detected ? detected.height : PAPER_SIZES.a4.height;
+  }
   const result = await mammothLib.convertToHtml({ arrayBuffer });
   const html = (result.value || "").trim();
   if (!html) throw new Error("The document appears to be empty or contains no extractable text.");
+  // Margins are applied by captureHtml — no padding needed in the wrapper
   await captureHtml(pdfDoc,
-    `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:12pt;line-height:1.35;color:#000;padding:72px">${html}</div>`,
+    `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:12pt;line-height:1.35;color:#000">${html}</div>`,
     pw, ph);
 }
 
-export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
+export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, paperKey = "a4") {
   resetRenderContainer();
   const data = new Uint8Array(arrayBuffer);
   const workbook = XLSX.read(data, { type: "array" });
@@ -336,9 +383,11 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc) {
   const sheet = workbook.Sheets[sheetName];
   const html = XLSX.utils.sheet_to_html(sheet, { editable: false });
   if (!html) throw new Error("The spreadsheet contains no data.");
+  const paper = PAPER_SIZES[paperKey] || PAPER_SIZES.a4;
+  // Margins are applied by captureHtml — no padding needed in the wrapper
   await captureHtml(pdfDoc,
-    `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:10pt;color:#000;padding:54px">${html}</div>`,
-    595.28, 841.89);
+    `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:10pt;color:#000">${html}</div>`,
+    paper.width, paper.height);
 }
 
 /** Sample multiple rows of canvas to detect content */
@@ -481,23 +530,41 @@ export async function convertPptxToPdfPages(arrayBuffer, pdfDoc) {
   }
 }
 
-export async function buildMixedPdf(imageItems) {
+export async function buildMixedPdf(imageItems, paperKey = "image", marginPt = 24) {
   const output = await PDFDocument.create();
+  const fixedPaper = PAPER_SIZES[paperKey];
   for (const item of imageItems) {
     const type = item.file.type || "";
     const ext = item.file.name.split(".").pop().toLowerCase();
     if (type.startsWith("image/") || ["png", "jpg", "jpeg"].includes(ext)) {
       const bytes = new Uint8Array(await item.file.arrayBuffer());
       const image = type === "image/png" || ext === "png" ? await output.embedPng(bytes) : await output.embedJpg(bytes);
-      const scale = Math.min(1, 1440 / Math.max(image.width, image.height));
-      const pw = image.width * scale;
-      const ph = image.height * scale;
-      const page = output.addPage([pw, ph]);
-      page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
+      if (fixedPaper) {
+        // Fit image within the chosen paper size, centred with the specified margin
+        const pw = fixedPaper.width;
+        const ph = fixedPaper.height;
+        const m = Math.max(0, marginPt);
+        const availW = Math.max(1, pw - 2 * m);
+        const availH = Math.max(1, ph - 2 * m);
+        const scale = Math.min(availW / image.width, availH / image.height, 1);
+        const iw = image.width * scale;
+        const ih = image.height * scale;
+        const x = m + (availW - iw) / 2;
+        const y = m + (availH - ih) / 2;
+        const page = output.addPage([pw, ph]);
+        page.drawImage(image, { x, y, width: iw, height: ih });
+      } else {
+        // "Fit each image" / "auto" — use natural image dimensions (capped at 1440 px)
+        const scale = Math.min(1, 1440 / Math.max(image.width, image.height));
+        const pw = image.width * scale;
+        const ph = image.height * scale;
+        const page = output.addPage([pw, ph]);
+        page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
+      }
     } else if (ext === "docx") {
-      await convertDocxToPdfPages(await item.file.arrayBuffer(), output);
+      await convertDocxToPdfPages(await item.file.arrayBuffer(), output, paperKey);
     } else if (ext === "xlsx") {
-      await convertXlsxToPdfPages(await item.file.arrayBuffer(), output);
+      await convertXlsxToPdfPages(await item.file.arrayBuffer(), output, paperKey);
     } else if (ext === "pptx") {
       await convertPptxToPdfPages(await item.file.arrayBuffer(), output);
     }

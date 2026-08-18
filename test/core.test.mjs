@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "../vendor/pdf-lib/pdf-lib.esm.min.js";
-import { buildPdfFromPages, calculateWatermarkPlacement, createSplitPdfs, fitImageWithinPage, moveItem, parseHexColor, parsePageSelection, signatureWidthForPage, stampPdf } from "../core.mjs";
+import { buildPdfFromPages, calculateWatermarkPlacement, createSplitPdfs, fitImageWithinPage, moveItem, PAPER_SIZES, parseHexColor, parsePageSelection, signatureWidthForPage, stampPdf } from "../core.mjs";
 
 test("page selections accept ranges, spaces, and duplicates", () => {
   assert.deepEqual(parsePageSelection("1-3, 3, 5", 5), [0, 1, 2, 4]);
@@ -78,4 +78,22 @@ test("selected pages can be split into independent PDFs", async () => {
   const outputs = await createSplitPdfs(source, [0, 1]);
   assert.equal(outputs.length, 2);
   for (const bytes of outputs) assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
+});
+
+test("PAPER_SIZES contains required formats with correct PDF-point dimensions", () => {
+  assert.ok(PAPER_SIZES.a4, "a4 must exist");
+  assert.equal(PAPER_SIZES.a4.width, 595.28);
+  assert.equal(PAPER_SIZES.a4.height, 841.89);
+  assert.ok(PAPER_SIZES.letter, "letter must exist");
+  assert.equal(PAPER_SIZES.letter.width, 612);
+  assert.ok(PAPER_SIZES.legal, "legal/oficio must exist");
+  assert.equal(PAPER_SIZES.legal.height, 1008, "Oficio/Legal height must be 1008pt (14 in)");
+  assert.ok(PAPER_SIZES.a3, "a3 must exist");
+  assert.ok(PAPER_SIZES.a5, "a5 must exist");
+  // ISO 216: A5 (148×210 mm) is half of A4 (210×297 mm) — verify dimensions are reasonable
+  assert.ok(PAPER_SIZES.a5.width > 400 && PAPER_SIZES.a5.width < 430, "A5 width ~419pt");
+  assert.ok(PAPER_SIZES.a5.height > 580 && PAPER_SIZES.a5.height < 610, "A5 height ~595pt");
+  assert.ok(PAPER_SIZES.executive, "executive must exist");
+  assert.ok(PAPER_SIZES.b5, "b5 must exist");
+  assert.ok(PAPER_SIZES.tabloid, "tabloid must exist");
 });
