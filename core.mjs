@@ -217,96 +217,228 @@ function cssPx(value) { return `${value}px`; }
 
 function ptToCss(pt) { return pt * PT2CSS; }
 
-async function detectDocxPageSize(arrayBuffer) {
+async function detectDocxLayout(arrayBuffer) {
+  // Returns { width, height, margins: {top,right,bottom,left} } all in PDF points
+  const result = { width: PAPER_SIZES.a4.width, height: PAPER_SIZES.a4.height,
+                   margins: { top: 56.7, right: 42.5, bottom: 56.7, left: 85.05 } };
   try {
     const JSZipLib = globalThis.JSZip;
-    if (!JSZipLib) return null;
+    if (!JSZipLib) return result;
     const zip = await JSZipLib.loadAsync(arrayBuffer);
     const file = zip.files["word/document.xml"];
-    if (!file) return null;
+    if (!file) return result;
     const xml = await file.async("text");
-    const tag = xml.match(/<[^>]*pgSz[^>]*\/?>/i);
-    if (tag) {
-      const w = tag[0].match(/\bw:w\s*=\s*["'](\d+)["']/i) || tag[0].match(/\bw\s*=\s*["'](\d+)["']/i);
-      const h = tag[0].match(/\bw:h\s*=\s*["'](\d+)["']/i) || tag[0].match(/\bh\s*=\s*["'](\d+)["']/i);
+    // Page size
+    const szTag = xml.match(/<[^>]*pgSz[^>]*\/?>/i);
+    if (szTag) {
+      const w = szTag[0].match(/\bw:w\s*=\s*["'](\d+)["']/i) || szTag[0].match(/\bw\s*=\s*["'](\d+)["']/i);
+      const h = szTag[0].match(/\bw:h\s*=\s*["'](\d+)["']/i) || szTag[0].match(/\bh\s*=\s*["'](\d+)["']/i);
       if (w && h) {
-        const width = Number(w[1]) / 20;
-        const height = Number(h[1]) / 20;
-        if (width > 0 && height > 0) return { width, height };
+        const pw = Number(w[1]) / 20, ph = Number(h[1]) / 20;
+        if (pw > 0 && ph > 0) { result.width = pw; result.height = ph; }
       }
     }
+    // Page margins (w:pgMar) — values are in twentieths of a point
+    const marTag = xml.match(/<[^>]*pgMar[^>]*\/?>/i);
+    if (marTag) {
+      const top    = marTag[0].match(/w:top\s*=\s*["'](\d+)["']/i);
+      const right  = marTag[0].match(/w:right\s*=\s*["'](\d+)["']/i);
+      const bottom = marTag[0].match(/w:bottom\s*=\s*["'](\d+)["']/i);
+      const left   = marTag[0].match(/w:left\s*=\s*["'](\d+)["']/i);
+      if (top)    result.margins.top    = Number(top[1])    / 20;
+      if (right)  result.margins.right  = Number(right[1])  / 20;
+      if (bottom) result.margins.bottom = Number(bottom[1]) / 20;
+      if (left)   result.margins.left   = Number(left[1])   / 20;
+    }
   } catch (err) {
-    console.warn("[BeeTales] DOCX page size detection failed:", err);
+    console.warn("[BeeTales] DOCX layout detection failed:", err);
   }
-  return null;
+  return result;
 }
 
 /**
- * Read paragraph alignments directly from the DOCX XML, resolving paragraph-style
- * inheritance. mammoth.js only picks up alignment from direct paragraph formatting
- * (w:pPr > w:jc) and silently drops alignment that comes from a named paragraph style.
+ * Open the DOCX ZIP once and return all per-paragraph properties needed for
+ * faithful rendering: alignment, indentation, spacing, and page-break flags.
+ * Resolves paragraph-style inheritance for each property.
  */
-async function extractDocxParagraphAlignments(arrayBuffer) {
+async function extractDocxParagraphProps(arrayBuffer) {
+  const empty = { alignments: [], indents: [], spacings: [], pageBreaks: [] };
   try {
     const JSZipLib = globalThis.JSZip;
-    if (!JSZipLib) return [];
+    if (!JSZipLib) return empty;
     const zip = await JSZipLib.loadAsync(arrayBuffer);
 
-    // Build styleId → justification map from word/styles.xml
-    const styleJcMap = {};
+    // ── Build style maps (styleId → property value) ──────────────────────────
+    const styleJc  = {}; // alignment
+    const styleInd = {}; // indentation
+    const styleSpc = {}; // spacing
     const stylesFile = zip.files["word/styles.xml"];
     if (stylesFile) {
       const sxml = await stylesFile.async("text");
       for (const block of sxml.match(/<w:style\b[\s\S]*?<\/w:style>/gi) || []) {
         const id = (block.match(/w:styleId="([^"]+)"/) || [])[1];
-        // Only look inside w:pPr to avoid matching w:jc used for East-Asian run properties
-        const pPrBlock = (block.match(/<w:pPr>([\s\S]*?)<\/w:pPr>/) || [])[1] || "";
-        const jc = (pPrBlock.match(/<w:jc\s+w:val="([^"]+)"/) || [])[1];
-        if (id && jc) styleJcMap[id] = jc;
+        if (!id) continue;
+        const pPr = (block.match(/<w:pPr>([\s\S]*?)<\/w:pPr>/) || [])[1] || "";
+        const jc   = (pPr.match(/<w:jc\s+w:val="([^"]+)"/)      || [])[1];
+        const ind  = pPr.match(/<w:ind\b([^/]*)\/?>/);
+        const spc  = pPr.match(/<w:spacing\b([^/]*)\/?>/);
+        if (jc)  styleJc[id]  = jc;
+        if (ind) styleInd[id] = ind[0];
+        if (spc) styleSpc[id] = spc[0];
       }
     }
 
-    // Extract per-paragraph alignment from the main document body only
+    // ── Build numbering format map ────────────────────────────────────────────
+    const numFmtMap = {}; // "numId:ilvl" → { format, lvlText, indent }
+    const numFile = zip.files["word/numbering.xml"];
+    if (numFile) {
+      const nxml = await numFile.async("text");
+      // abstractNum: define formats per level
+      const abstractNums = {};
+      for (const ab of nxml.match(/<w:abstractNum\b[\s\S]*?<\/w:abstractNum>/gi) || []) {
+        const abId = (ab.match(/w:abstractNumId="([^"]+)"/) || [])[1];
+        if (!abId) continue;
+        const levels = {};
+        for (const lvl of ab.match(/<w:lvl\b[\s\S]*?<\/w:lvl>/gi) || []) {
+          const ilvl   = (lvl.match(/w:ilvl="([^"]+)"/)          || [])[1];
+          const fmt    = (lvl.match(/<w:numFmt\s+w:val="([^"]+)"/)  || [])[1];
+          const text   = (lvl.match(/<w:lvlText\s+w:val="([^"]+)"/) || [])[1];
+          const indTag = lvl.match(/<w:ind\b([^/]*)\/?>/);
+          if (ilvl != null) levels[ilvl] = { fmt: fmt || "bullet", text: text || "•",
+                                              indTag: indTag ? indTag[0] : "" };
+        }
+        abstractNums[abId] = levels;
+      }
+      // num: map numId → abstractNumId
+      for (const num of nxml.match(/<w:num\b[\s\S]*?<\/w:num>/gi) || []) {
+        const nId  = (num.match(/w:numId="([^"]+)"/)                    || [])[1];
+        const abId = (num.match(/<w:abstractNumId\s+w:val="([^"]+)"/)   || [])[1];
+        if (nId && abId && abstractNums[abId]) {
+          for (const [ilvl, info] of Object.entries(abstractNums[abId])) {
+            numFmtMap[`${nId}:${ilvl}`] = info;
+          }
+        }
+      }
+    }
+
+    // ── Walk document body paragraphs ─────────────────────────────────────────
     const docFile = zip.files["word/document.xml"];
-    if (!docFile) return [];
-    const xml = await docFile.async("text");
-    // Limit scope to w:body so we skip paragraphs inside text-boxes, SDTs, etc.
+    if (!docFile) return empty;
+    const xml  = await docFile.async("text");
     const body = (xml.match(/<w:body>([\s\S]*?)<\/w:body>/) || [])[1] || xml;
 
-    const alignments = [];
+    const alignments = [], indents = [], spacings = [], pageBreaks = [];
+
     for (const para of body.match(/<w:p[ >][\s\S]*?<\/w:p>/gi) || []) {
-      const pPr = (para.match(/<w:pPr>([\s\S]*?)<\/w:pPr>/) || [])[1] || "";
-      // Direct paragraph formatting takes precedence over style
-      const directJc = (pPr.match(/<w:jc\s+w:val="([^"]+)"/) || [])[1];
-      if (directJc) { alignments.push(directJc); continue; }
-      // Fall back to the paragraph's named style
-      const styleId = (pPr.match(/<w:pStyle\s+w:val="([^"]+)"/) || [])[1];
-      alignments.push((styleId && styleJcMap[styleId]) || "");
+      const pPr   = (para.match(/<w:pPr>([\s\S]*?)<\/w:pPr>/) || [])[1] || "";
+      const styleId = (pPr.match(/<w:pStyle\s+w:val="([^"]+)"/) || [])[1] || "";
+
+      // ── Alignment ──
+      const jc = (pPr.match(/<w:jc\s+w:val="([^"]+)"/) || [])[1]
+              || (styleId && styleJc[styleId]) || "";
+      alignments.push(jc);
+
+      // ── Indentation (merge style + direct; direct wins per-attr) ──
+      const indDirect = (pPr.match(/<w:ind\b([^/]*)\/?>/)  || [])[0] || "";
+      const indStyle  = (styleId && styleInd[styleId]) || "";
+      // Also check numbering indentation
+      const numId = (pPr.match(/<w:numId\s+w:val="([^"]+)"/)  || [])[1];
+      const ilvl  = (pPr.match(/<w:ilvl\s+w:val="([^"]+)"/)   || [])[1] || "0";
+      const numInfo = numId ? numFmtMap[`${numId}:${ilvl}`] : null;
+      const indNum  = numInfo ? numInfo.indTag : "";
+      const indSrc  = indDirect || indNum || indStyle;
+      const getIndAttr = (src, attr) => { const m = src.match(new RegExp(`w:${attr}="([-\\d]+)"`)); return m ? Number(m[1]) / 20 : null; };
+      indents.push({
+        left:      getIndAttr(indSrc, "left"),
+        right:     getIndAttr(indSrc, "right"),
+        firstLine: getIndAttr(indDirect || indStyle, "firstLine"),
+        hanging:   getIndAttr(indDirect || indStyle, "hanging"),
+        numId, ilvl,
+      });
+
+      // ── Spacing ──
+      const spcDirect = (pPr.match(/<w:spacing\b([^/]*)\/?>/) || [])[0] || "";
+      const spcStyle  = (styleId && styleSpc[styleId]) || "";
+      const spcSrc    = spcDirect || spcStyle;
+      const getSpcAttr = (src, attr) => { const m = src.match(new RegExp(`w:${attr}="([-\\d]+)"`)); return m ? Number(m[1]) / 20 : null; };
+      const lineVal  = getSpcAttr(spcSrc, "line");
+      const lineRule = (spcSrc.match(/w:lineRule="([^"]+)"/) || [])[1] || "auto";
+      let lineHeight = null;
+      if (lineVal !== null) {
+        // lineRule="exact"|"atLeast" → value is in twips → pt; "auto" → value/240 multiplier
+        lineHeight = lineRule === "auto" ? lineVal / 12 : lineVal; // auto: 240=single=1.0 line
+      }
+      spacings.push({
+        before: getSpcAttr(spcSrc, "before"),
+        after:  getSpcAttr(spcSrc, "after"),
+        lineHeight,
+        lineRule,
+      });
+
+      // ── Page break ──
+      const hasPageBreak = /<w:pageBreakBefore\/>/.test(pPr)
+                        || /<w:pageBreakBefore\s+w:val="1"/.test(pPr)
+                        || /<w:br\s+w:type="page"/.test(para);
+      pageBreaks.push(hasPageBreak);
     }
-    return alignments;
+
+    return { alignments, indents, spacings, pageBreaks, numFmtMap };
   } catch (err) {
-    console.warn("[BeeTales] Paragraph alignment extraction failed:", err);
-    return [];
+    console.warn("[BeeTales] DOCX paragraph property extraction failed:", err);
+    return empty;
   }
 }
 
 /**
- * Inject text-align inline styles into mammoth's <p> elements using the
- * alignment array produced by extractDocxParagraphAlignments.
+ * Inject alignment, indentation, spacing, and page-break styles into mammoth HTML.
+ * Replaces the old injectParagraphAlignments — now handles all paragraph properties
+ * extracted by extractDocxParagraphProps.
  */
-function injectParagraphAlignments(html, alignments) {
-  if (!alignments.length) return html;
-  const cssMap = { center: "center", right: "right", both: "justify", distribute: "justify" };
+function injectParagraphStyles(html, props) {
+  const { alignments = [], indents = [], spacings = [], pageBreaks = [] } = props;
+  if (!alignments.length && !indents.length && !spacings.length && !pageBreaks.length) return html;
+  const alignCss = { center: "center", right: "right", both: "justify", distribute: "justify" };
   let idx = 0;
+
+  // Pre-inject page-break divs before paragraphs that need them
+  // Then inject inline styles on <p> elements
   return html.replace(/<p(\s[^>]*)?>/gi, (match, attrs) => {
-    const cssAlign = cssMap[alignments[idx++] || ""];
-    if (!cssAlign) return match;
+    const i = idx++;
+    const parts = [];
+
+    // Alignment
+    const al = alignCss[alignments[i] || ""];
+    if (al) parts.push(`text-align:${al}`);
+
+    // Indentation (convert pt to em relative to 11pt base for robustness)
+    const ind = indents[i] || {};
+    if (ind.left  != null) parts.push(`margin-left:${ind.left}pt`);
+    if (ind.right != null) parts.push(`margin-right:${ind.right}pt`);
+    if (ind.firstLine != null && ind.firstLine > 0) parts.push(`text-indent:${ind.firstLine}pt`);
+    else if (ind.hanging != null && ind.hanging > 0) parts.push(`text-indent:-${ind.hanging}pt`,`padding-left:${ind.hanging}pt`);
+
+    // Spacing
+    const spc = spacings[i] || {};
+    if (spc.before != null) parts.push(`margin-top:${spc.before}pt`);
+    if (spc.after  != null) parts.push(`margin-bottom:${spc.after}pt`);
+    else parts.push(`margin-bottom:8pt`); // default Word spacing-after
+    if (spc.lineHeight != null) {
+      const lh = spc.lineRule === "auto" ? (spc.lineHeight / 20).toFixed(3) : `${spc.lineHeight}pt`;
+      parts.push(`line-height:${lh}`);
+    } else {
+      parts.push(`line-height:1.15`);
+    }
+
+    // Page break prefix
+    const pb = pageBreaks[i] ? `<div style="break-before:page;page-break-before:always"></div>` : "";
+
+    if (!parts.length) return `${pb}${match}`;
     attrs = attrs || "";
     const styleMatch = /\bstyle="([^"]*)"/i.exec(attrs);
     if (styleMatch) {
-      return `<p${attrs.replace(/\bstyle="([^"]*)"/i, `style="${styleMatch[1]}text-align:${cssAlign};"`)}>`;
+      return `${pb}<p${attrs.replace(/\bstyle="([^"]*)"/i, `style="${styleMatch[1]}${parts.join(";")};"`)}}>`;
     }
-    return `<p${attrs} style="text-align:${cssAlign};">`;
+    return `${pb}<p${attrs} style="${parts.join(";")};">`;
   });
 }
 
@@ -429,28 +561,45 @@ export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "aut
   resetRenderContainer();
   const mammothLib = globalThis.mammoth;
   if (!mammothLib) throw new Error("mammoth library is not available.");
-  const forcedPaper = PAPER_SIZES[paperKey];
-  let pw, ph;
-  if (forcedPaper) {
-    pw = forcedPaper.width;
-    ph = forcedPaper.height;
+
+  // ── 1. Detect page layout (size + real DOCX margins) ─────────────────────
+  const layout = await detectDocxLayout(arrayBuffer);
+  let pw, ph, docMarginPt;
+  if (PAPER_SIZES[paperKey]) {
+    pw = PAPER_SIZES[paperKey].width;
+    ph = PAPER_SIZES[paperKey].height;
+    docMarginPt = marginPt; // user-selected margin wins when a size is forced
   } else {
-    const detected = await detectDocxPageSize(arrayBuffer);
-    pw = detected ? detected.width : PAPER_SIZES.a4.width;
-    ph = detected ? detected.height : PAPER_SIZES.a4.height;
+    pw = layout.width;
+    ph = layout.height;
+    // If the UI says "Detect" (paperKey=="auto") use the DOCX margins;
+    // if UI says "None" (marginPt===0), honour that.
+    docMarginPt = marginPt === 0 ? 0 : layout.margins.top; // symmetric simplification
   }
-  // Extract paragraph alignments from DOCX XML before calling mammoth,
-  // since mammoth silently drops style-based alignment (center, right, justify).
-  const alignments = await extractDocxParagraphAlignments(arrayBuffer);
-  // ignoreEmptyParagraphs:false preserves blank lines between stanzas/sections.
-  const result = await mammothLib.convertToHtml({ arrayBuffer, ignoreEmptyParagraphs: false });
+
+  // ── 2. Extract paragraph properties (alignment, indent, spacing, breaks) ─
+  const props = await extractDocxParagraphProps(arrayBuffer);
+
+  // ── 3. Convert DOCX → HTML with mammoth (including embedded images) ───────
+  const result = await mammothLib.convertToHtml({
+    arrayBuffer,
+    ignoreEmptyParagraphs: false,
+    convertImage: mammothLib.images.imgElement(async (image) => {
+      try {
+        const b64 = await image.read("base64");
+        return { src: `data:${image.contentType};base64,${b64}` };
+      } catch { return {}; }
+    }),
+  });
   const rawHtml = (result.value || "").trim();
   if (!rawHtml) throw new Error("The document appears to be empty or contains no extractable text.");
-  // Inject the correct text-align on each <p> that mammoth left without it.
-  const html = injectParagraphAlignments(rawHtml, alignments);
-  // Word-faithful CSS: reset browser paragraph margins, match Word line/spacing defaults.
-  // @font-face aliases let web fonts cover the case where MS fonts are not locally installed.
+
+  // ── 4. Inject paragraph styles extracted from the DOCX XML ────────────────
+  const html = injectParagraphStyles(rawHtml, props);
+
+  // ── 5. Build CSS reset (Word defaults + font aliases + table/list rules) ──
   const docxCss = [
+    // Font aliases: local MS font → web-font substitute when MS font not installed
     "@font-face{font-family:'Calibri';src:local('Calibri'),local('carlito regular'),local('Carlito');font-weight:400;font-style:normal}",
     "@font-face{font-family:'Calibri';src:local('Calibri Bold'),local('carlito bold'),local('Carlito');font-weight:700;font-style:normal}",
     "@font-face{font-family:'Calibri';src:local('Calibri Italic'),local('Carlito Italic');font-weight:400;font-style:italic}",
@@ -459,17 +608,25 @@ export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "aut
     "@font-face{font-family:'Times New Roman';src:local('Times New Roman'),local('tinos regular'),local('Tinos');font-weight:400;font-style:normal}",
     "@font-face{font-family:'Times New Roman';src:local('Times New Roman Bold'),local('Tinos Bold');font-weight:700;font-style:normal}",
     "@font-face{font-family:'Courier New';src:local('Courier New'),local('cousine regular'),local('Cousine');font-weight:400;font-style:normal}",
+    // Base reset — injectParagraphStyles overrides per-paragraph via inline styles
     "p{margin:0 0 8pt 0;line-height:1.15}",
-    "ul,ol{margin:0 0 8pt 0;padding-left:36pt}",
+    // Lists — numbering style overrides are handled by injectParagraphStyles indentation
+    "ul{list-style-type:disc;margin:0 0 8pt 0;padding-left:36pt}",
+    "ol{list-style-type:decimal;margin:0 0 8pt 0;padding-left:36pt}",
     "li{margin-bottom:0;line-height:1.15}",
-    "h1,h2,h3,h4,h5,h6{margin:0 0 8pt 0;line-height:1.15}",
-    "table{border-collapse:collapse;width:100%;margin-bottom:8pt}",
-    "td,th{padding:3pt 6pt;border:1px solid #bbb;vertical-align:top}",
+    // Headings
+    "h1{font-size:16pt;margin:0 0 8pt 0;line-height:1.15}h2{font-size:14pt;margin:0 0 8pt 0;line-height:1.15}",
+    "h3,h4,h5,h6{margin:0 0 8pt 0;line-height:1.15}",
+    // Tables — column widths are set via inline width attrs injected below
+    "table{border-collapse:collapse;width:100%;margin-bottom:8pt;table-layout:fixed}",
+    "td,th{padding:3pt 6pt;border:1px solid #bbb;vertical-align:top;overflow:hidden;word-break:break-word}",
+    // Images
+    "img{max-width:100%;height:auto}",
   ].join("");
-  // Margins are applied by captureHtml — no padding needed in the wrapper
+
   await captureHtml(pdfDoc,
     `<div style="box-sizing:border-box;font-family:Calibri,Carlito,'Segoe UI',Arimo,Arial,sans-serif;font-size:11pt;line-height:1.15;color:#000">${html}</div>`,
-    pw, ph, marginPt, docxCss);
+    pw, ph, docMarginPt, docxCss);
 }
 
 export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, paperKey = "a4", marginPt = 0) {
