@@ -2,6 +2,7 @@ import { PDFDocument, StandardFonts, degrees, rgb } from "./vendor/pdf-lib/pdf-l
 import * as XLSX from "./vendor/xlsx/xlsx.mjs";
 import html2canvas from "./vendor/html2canvas/html2canvas.esm.js";
 import { getVectorFont } from "./font-manager.mjs";
+import { convertDocxNative } from "./docx-engine.mjs";
 
 /** Standard paper sizes in PDF points (1 pt = 1/72 inch). */
 export const PAPER_SIZES = {
@@ -729,6 +730,15 @@ async function renderDocxVector(pdfDoc, html, pw, ph, marginPt) {
 
 export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "auto", marginPt = 0) {
   resetRenderContainer();
+
+  // ── Primary: 100% Native Vector DOCX Engine (Phase 3) ───────────────────
+  try {
+    const rendered = await convertDocxNative(arrayBuffer, pdfDoc, paperKey, marginPt);
+    if (rendered) return;
+  } catch (nativeErr) {
+    console.warn("[BeeTales] Native DOCX direct conversion fallback:", nativeErr);
+  }
+
   const mammothLib = globalThis.mammoth;
   if (!mammothLib) throw new Error("mammoth library is not available.");
 

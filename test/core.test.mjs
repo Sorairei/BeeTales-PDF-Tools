@@ -115,3 +115,72 @@ test("getVectorFont embeds metric-compatible TTF fonts with caching", async () =
   const bytes = await doc.save();
   assert.ok(bytes.length > 0, "PDF document with vector font should be generated");
 });
+
+test("NumberingManager formats list counters and levels correctly", async () => {
+  const { NumberingManager } = await import("../docx-engine.mjs");
+  const numXml = `
+    <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+        <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%2)"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+    </w:numbering>
+  `;
+  const manager = new NumberingManager(numXml);
+  assert.equal(manager.getLabel("1", 0), "1. ");
+  assert.equal(manager.getLabel("1", 0), "2. ");
+  assert.equal(manager.getLabel("1", 1), "a) ");
+});
+
+test("StyleResolver computes 4-level style cascade", async () => {
+  const { StyleResolver } = await import("../docx-engine.mjs");
+  const stylesXml = `
+    <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:docDefaults>
+        <w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault>
+      </w:docDefaults>
+      <w:style w:styleId="Normal">
+        <w:pPr><w:jc w:val="left"/><w:spacing w:after="160"/></w:pPr>
+      </w:style>
+      <w:style w:styleId="Heading1">
+        <w:basedOn w:val="Normal"/>
+        <w:pPr><w:jc w:val="center"/><w:spacing w:before="240" w:after="120"/></w:pPr>
+      </w:style>
+    </w:styles>
+  `;
+  const resolver = new StyleResolver(stylesXml);
+  const headingProps = resolver.resolveParagraphProps("Heading1");
+  assert.equal(headingProps.jc, "center", "Heading1 should inherit and override center alignment");
+  assert.equal(headingProps.spaceBefore, 12, "Heading1 spaceBefore = 240/20 = 12pt");
+  assert.equal(headingProps.spaceAfter, 6, "Heading1 spaceAfter = 120/20 = 6pt");
+});
+
+test("convertDocxNative creates pure vector PDF from document XML", async () => {
+  const { convertDocxNative } = await import("../docx-engine.mjs");
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+
+  const docXml = `
+    <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:body>
+        <w:p>
+          <w:pPr><w:jc w:val="center"/></w:pPr>
+          <w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>Titulo Nativo Vectorial</w:t></w:r>
+        </w:p>
+        <w:p>
+          <w:r><w:t>Este párrafo fue generado 100% nativo sin html2canvas.</w:t></w:r>
+        </w:p>
+      </w:body>
+    </w:document>
+  `;
+  zip.file("word/document.xml", docXml);
+  const docxBytes = await zip.generateAsync({ type: "arraybuffer" });
+
+  const pdfDoc = await PDFDocument.create();
+  await convertDocxNative(docxBytes, pdfDoc, "a4", 36);
+  assert.equal(pdfDoc.getPageCount(), 1, "PDF should contain 1 page");
+
+  const pdfBytes = await pdfDoc.save();
+  assert.ok(pdfBytes.length > 0, "PDF bytes should be successfully generated");
+});
