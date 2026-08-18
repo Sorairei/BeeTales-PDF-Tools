@@ -293,7 +293,7 @@ async function waitForCanvasContent(canvas, maxAttempts = 5) {
   }
 }
 
-async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt, marginPt = 0) {
+async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt, marginPt = 0, cssReset = "") {
   const cssW = ptToCss(pageWidthPt);
   const cssH = ptToCss(pageHeightPt);
   const marginCss = ptToCss(marginPt);
@@ -303,6 +303,12 @@ async function captureHtml(pdfDoc, html, pageWidthPt, pageHeightPt, marginPt = 0
 
   const el = getRenderContainer(printableW);
   el.innerHTML = sanitizeHtml(html);
+  // Inject trusted CSS reset after sanitisation so it is never stripped
+  if (cssReset) {
+    const styleEl = document.createElement("style");
+    styleEl.textContent = cssReset;
+    el.prepend(styleEl);
+  }
   await settle(el);
   // Second rAF pass guards against browsers that return scrollHeight=0 on off-screen elements
   await new Promise((r) => requestAnimationFrame(r));
@@ -367,10 +373,28 @@ export async function convertDocxToPdfPages(arrayBuffer, pdfDoc, paperKey = "aut
   const result = await mammothLib.convertToHtml({ arrayBuffer });
   const html = (result.value || "").trim();
   if (!html) throw new Error("The document appears to be empty or contains no extractable text.");
+  // Word-faithful CSS: reset browser paragraph margins, match Word line/spacing defaults.
+  // @font-face aliases let web fonts cover the case where MS fonts are not locally installed.
+  const docxCss = [
+    "@font-face{font-family:'Calibri';src:local('Calibri'),local('carlito regular'),local('Carlito');font-weight:400;font-style:normal}",
+    "@font-face{font-family:'Calibri';src:local('Calibri Bold'),local('carlito bold'),local('Carlito');font-weight:700;font-style:normal}",
+    "@font-face{font-family:'Calibri';src:local('Calibri Italic'),local('Carlito Italic');font-weight:400;font-style:italic}",
+    "@font-face{font-family:'Arial';src:local('Arial'),local('arimo regular'),local('Arimo');font-weight:400;font-style:normal}",
+    "@font-face{font-family:'Arial';src:local('Arial Bold'),local('Arimo Bold');font-weight:700;font-style:normal}",
+    "@font-face{font-family:'Times New Roman';src:local('Times New Roman'),local('tinos regular'),local('Tinos');font-weight:400;font-style:normal}",
+    "@font-face{font-family:'Times New Roman';src:local('Times New Roman Bold'),local('Tinos Bold');font-weight:700;font-style:normal}",
+    "@font-face{font-family:'Courier New';src:local('Courier New'),local('cousine regular'),local('Cousine');font-weight:400;font-style:normal}",
+    "p{margin:0 0 8pt 0;line-height:1.15}",
+    "ul,ol{margin:0 0 8pt 0;padding-left:36pt}",
+    "li{margin-bottom:0;line-height:1.15}",
+    "h1,h2,h3,h4,h5,h6{margin:0 0 8pt 0;line-height:1.15}",
+    "table{border-collapse:collapse;width:100%;margin-bottom:8pt}",
+    "td,th{padding:3pt 6pt;border:1px solid #bbb;vertical-align:top}",
+  ].join("");
   // Margins are applied by captureHtml — no padding needed in the wrapper
   await captureHtml(pdfDoc,
-    `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:12pt;line-height:1.35;color:#000">${html}</div>`,
-    pw, ph, marginPt);
+    `<div style="box-sizing:border-box;font-family:Calibri,Carlito,'Segoe UI',Arimo,Arial,sans-serif;font-size:11pt;line-height:1.15;color:#000">${html}</div>`,
+    pw, ph, marginPt, docxCss);
 }
 
 export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, paperKey = "a4", marginPt = 0) {
@@ -383,10 +407,16 @@ export async function convertXlsxToPdfPages(arrayBuffer, pdfDoc, paperKey = "a4"
   const html = XLSX.utils.sheet_to_html(sheet, { editable: false });
   if (!html) throw new Error("The spreadsheet contains no data.");
   const paper = PAPER_SIZES[paperKey] || PAPER_SIZES.a4;
+  const xlsxCss = [
+    "table{border-collapse:collapse;width:100%}",
+    "td,th{padding:3pt 6pt;border:1px solid #ccc;vertical-align:top;white-space:nowrap}",
+    "tr:nth-child(even) td{background:#f7f7f7}",
+    "th{background:#e8e8e8;font-weight:bold}",
+  ].join("");
   // Margins are applied by captureHtml — no padding needed in the wrapper
   await captureHtml(pdfDoc,
-    `<div style="box-sizing:border-box;font-family:Calibri,Segoe UI,Roboto,sans-serif;font-size:10pt;color:#000">${html}</div>`,
-    paper.width, paper.height, marginPt);
+    `<div style="box-sizing:border-box;font-family:Calibri,Carlito,'Segoe UI',Arimo,Arial,sans-serif;font-size:10pt;line-height:1.15;color:#000">${html}</div>`,
+    paper.width, paper.height, marginPt, xlsxCss);
 }
 
 /** Sample multiple rows of canvas to detect content */
